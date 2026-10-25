@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0b0c10">
+    <meta name="color-scheme" content="dark light">
+    <title>Macdro</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+</head>
+<body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="shell">
+        <header class="topbar">
+            <div class="brand">
+                <div class="mark">M</div>
+                <div>
+                    <h1>Macdro</h1>
+                    <p id="status" class="status"><span class="dot"></span> Connecting…</p>
+                </div>
+            </div>
+            <button id="refresh" class="icon-button" type="button" aria-label="Refresh">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4"/>
+                </svg>
+            </button>
+        </header>
+
+        <section class="summary">
+            <div>
+                <p class="eyebrow">Shared from Mac</p>
+                <h2 id="summary-title">Waiting for files</h2>
+                <p id="summary-detail" class="muted">Drop files on the Macdro icon on your Mac.</p>
+            </div>
+            <div id="file-count" class="count" aria-label="Number of files">0</div>
+        </section>
+
+        <a id="download-all" class="zip-button hidden" href="/api/zip">
+            <span>Download all as ZIP</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/>
+            </svg>
+        </a>
+
+        <section id="upload-panel" class="upload-panel">
+            <div class="upload-copy">
+                <p class="eyebrow">Send to Mac</p>
+                <h2 class="upload-title">Upload files</h2>
+                <p class="muted">Choose files or drop them here. They save to Downloads/Macdro.</p>
+            </div>
+            <div class="upload-actions">
+                <label class="upload-button">
+                    <input id="upload-input" type="file" multiple hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 19V6m0 0-5 5m5-5 5 5M5 20h14"/>
+                    </svg>
+                    <span>Choose files</span>
+                </label>
+                <label class="upload-button upload-button-secondary">
+                    <input id="folder-input" type="file" webkitdirectory multiple hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2h5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/>
+                    </svg>
+                    <span>Choose folder</span>
+                </label>
+            </div>
+        </section>
+
+        <section id="uploads" class="upload-list" aria-live="polite"></section>
+
+        <section class="clipboard-panel">
+            <div class="clipboard-copy">
+                <p class="eyebrow">Clipboard</p>
+                <p class="muted">Move plain text between this device and your Mac.</p>
+            </div>
+            <div class="clipboard-actions">
+                <button id="clipboard-copy" class="upload-button" type="button">Copy from Mac</button>
+                <button id="clipboard-send" class="upload-button upload-button-secondary" type="button">Send to Mac</button>
+            </div>
+            <p id="clipboard-status" class="clipboard-status" aria-live="polite"></p>
+        </section>
+
+        <section id="empty" class="empty">
+            <div class="empty-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2h5A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/>
+                </svg>
+            </div>
+            <p class="empty-title">Nothing here yet</p>
+            <p class="muted">The page updates automatically when the Mac starts sharing.</p>
+        </section>
+
+        <section id="files" class="file-list" aria-live="polite"></section>
+
+        <footer class="footer">
+            <span class="lock"></span>
+            <span>Encrypted transfer on your local network. Nothing is uploaded to the cloud.</span>
+        </footer>
+    </main>
+
+    <template id="file-template">
+        <article class="file">
+            <div class="file-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                    <path d="M7 3.5h6.5L18 8v12.5H7a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z"/>
+                    <path d="M13.5 3.5V8H18"/>
+                </svg>
+            </div>
+            <div class="file-meta">
+                <p class="file-name"></p>
+                <p class="file-sub"></p>
+            </div>
+            <a class="download" href="#" download>
+                <span>Download</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/>
+                </svg>
+            </a>
+        </article>
+    </template>
+</body>
+</html>

@@ -1,0 +1,8 @@
+.build/
+dist/
+.swiftpm/
+Macdro.xcodeproj/
+DerivedData/
+.DS_Store
+*.xcuserstate
+xcuserdata/

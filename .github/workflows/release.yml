@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Git tag to publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      MACDRO_SIGNING_IDENTITY: ${{ secrets.MACDRO_SIGNING_IDENTITY }}
+      MACDRO_NOTARY_PROFILE: ${{ secrets.MACDRO_NOTARY_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Verify
+        run: ./scripts/verify.sh
+
+      - name: Build universal DMG
+        run: ./scripts/build-release.sh
+
+      - name: Show checksum
+        run: cat dist/Macdro.dmg.sha256
+
+      - name: Publish GitHub Release
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/Macdro.dmg dist/Macdro.dmg.sha256 --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/Macdro.dmg dist/Macdro.dmg.sha256 \
+              --title "Macdro $RELEASE_TAG" \
+              --generate-notes
+          fi

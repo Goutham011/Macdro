@@ -1,0 +1,41 @@
+name: Macdro
+options:
+  bundleIdPrefix: com.macdro
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  groupSortPosition: top
+
+packages:
+  Macdro:
+    path: .
+
+targets:
+  Macdro:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Macdro
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.macdro.app
+        PRODUCT_NAME: Macdro
+        INFOPLIST_FILE: App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - package: Macdro
+        product: MacdroKit
+
+schemes:
+  Macdro:
+    build:
+      targets:
+        Macdro: all
+    run:
+      config: Debug
+    archive:
+      config: Release
