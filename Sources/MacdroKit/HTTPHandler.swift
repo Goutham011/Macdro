@@ -363,6 +363,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         context: ChannelHandlerContext,
         request: HTTPRequestHead
     ) {
+        let loopBoundContext = NIOLoopBound(context, eventLoop: context.eventLoop)
         tail.whenComplete { [weak self] result in
             guard let self else { return }
 
@@ -380,7 +381,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
                 if wasResumable, !shouldComplete {
                     self.respondUploadChunk(upload, context: context, request: request) {
                         self.releaseResumableLease()
-                        self.completeUploadResponse(context: context)
+                        self.completeUploadResponse(context: loopBoundContext.value)
                     }
                     return
                 }
@@ -396,7 +397,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
                         }
                         self.releaseResumableLease()
                         self.respondUpload(value, context: context, request: request) {
-                            self.completeUploadResponse(context: context)
+                            self.completeUploadResponse(context: loopBoundContext.value)
                         }
                     case .failure(let error):
                         if wasResumable, let id {
@@ -405,7 +406,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
                         self.releaseResumableLease()
                         self.logger.error("Upload failed: \(error)")
                         self.respondUploadError(error, context: context, request: request) {
-                            self.completeUploadResponse(context: context)
+                            self.completeUploadResponse(context: loopBoundContext.value)
                         }
                     }
                 }
