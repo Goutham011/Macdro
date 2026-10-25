@@ -1,0 +1,117 @@
+<svg width="1280" height="420" viewBox="0 0 1280 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Macdro — local-first file transfer for macOS</title>
+  <desc id="desc">Macdro banner: a native macOS file transfer server with a zero-install phone client, private LAN transfers, and TLS.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06080F"/>
+      <stop offset="0.55" stop-color="#090C17"/>
+      <stop offset="1" stop-color="#0D0A19"/>
+    </linearGradient>
+    <radialGradient id="violetGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#7C3AED" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cyanGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#06B6D4" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#06B6D4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="titleGradient" x1="84" y1="140" x2="540" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="752" y1="168" x2="1038" y2="294" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="card" x1="730" y1="94" x2="1060" y2="340" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#0A0F1E"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#FFFFFF" stroke-opacity="0.045"/>
+    </pattern>
+    <filter id="cardShadow" x="690" y="54" width="410" height="326" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="phoneShadow" x="1070" y="54" width="184" height="326" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="420" rx="28" fill="url(#background)"/>
+  <rect width="1280" height="420" rx="28" fill="url(#grid)"/>
+  <circle cx="1010" cy="40" r="360" fill="url(#violetGlow)"/>
+  <circle cx="110" cy="420" r="300" fill="url(#cyanGlow)"/>
+  <path d="M0 348C166 314 198 252 358 268C518 284 570 338 724 310C878 282 934 216 1280 246V420H0V348Z" fill="#FFFFFF" fill-opacity="0.018"/>
+
+  <text x="84" y="92" fill="#A78BFA" font-family="SF Mono, ui-monospace, monospace" font-size="13" font-weight="600" letter-spacing="3.2">LOCAL-FIRST FILE TRANSFER</text>
+  <text x="80" y="190" fill="url(#titleGradient)" font-family="SF Pro Display, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="88" font-weight="700" letter-spacing="-4">Macdro</text>
+  <text x="84" y="241" fill="#F1F5F9" font-family="SF Pro Display, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="29" font-weight="600" letter-spacing="-0.6">Your Mac. Your files. Your network.</text>
+  <text x="84" y="282" fill="#94A3B8" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">LAN-speed transfers to any phone browser.</text>
+  <text x="84" y="310" fill="#94A3B8" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">No cloud. No account. No app install.</text>
+
+  <g transform="translate(84 346)" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" font-weight="600">
+    <rect width="106" height="32" rx="16" fill="#0F172A" stroke="#27324A"/>
+    <text x="53" y="21" fill="#C4B5FD" text-anchor="middle">macOS 14+</text>
+    <rect x="118" width="124" height="32" rx="16" fill="#0F172A" stroke="#27324A"/>
+    <text x="180" y="21" fill="#C4B5FD" text-anchor="middle">Swift + NIO</text>
+    <rect x="254" width="98" height="32" rx="16" fill="#0F172A" stroke="#27324A"/>
+    <text x="303" y="21" fill="#C4B5FD" text-anchor="middle">TLS 1.2+</text>
+  </g>
+
+  <g filter="url(#cardShadow)">
+    <rect x="730" y="94" width="330" height="246" rx="20" fill="url(#card)" stroke="#26324B"/>
+    <path d="M730 132H1060" stroke="#1E293B"/>
+    <circle cx="752" cy="113" r="4" fill="#F87171"/>
+    <circle cx="766" cy="113" r="4" fill="#FBBF24"/>
+    <circle cx="780" cy="113" r="4" fill="#34D399"/>
+    <text x="1038" y="117" fill="#64748B" font-family="SF Mono, ui-monospace, monospace" font-size="10" text-anchor="end" letter-spacing="1.2">MACDRO / RECEIVER</text>
+    <text x="752" y="158" fill="#F8FAFC" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="16" font-weight="600">4 files ready</text>
+    <text x="1038" y="158" fill="#A78BFA" font-family="SF Mono, ui-monospace, monospace" font-size="11" text-anchor="end">8.2 GB</text>
+
+    <rect x="752" y="172" width="286" height="40" rx="11" fill="#111C33" stroke="#1E2A44"/>
+    <rect x="764" y="182" width="20" height="20" rx="6" fill="url(#accent)"/>
+    <path d="M770 188H778M774 188V197" stroke="#FFFFFF" stroke-width="1.4" stroke-linecap="round"/>
+    <rect x="794" y="183" width="128" height="6" rx="3" fill="#64748B"/>
+    <rect x="794" y="195" width="78" height="5" rx="2.5" fill="#334155"/>
+
+    <rect x="752" y="220" width="286" height="40" rx="11" fill="#0D1628" stroke="#1B2740"/>
+    <rect x="764" y="230" width="20" height="20" rx="6" fill="#0E7490"/>
+    <path d="M770 235H778V240H770V245H778" stroke="#CFFAFE" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="794" y="231" width="102" height="6" rx="3" fill="#475569"/>
+    <rect x="794" y="243" width="62" height="5" rx="2.5" fill="#293548"/>
+
+    <rect x="752" y="268" width="286" height="40" rx="11" fill="#0D1628" stroke="#1B2740"/>
+    <rect x="764" y="278" width="20" height="20" rx="6" fill="#7C3AED" fill-opacity="0.7"/>
+    <path d="M770 285L774 289L780 281" stroke="#EDE9FE" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="794" y="279" width="116" height="6" rx="3" fill="#475569"/>
+    <rect x="794" y="291" width="70" height="5" rx="2.5" fill="#293548"/>
+  </g>
+
+  <g filter="url(#phoneShadow)">
+    <rect x="1110" y="94" width="104" height="246" rx="26" fill="#090E1A" stroke="#334155" stroke-width="1.5"/>
+    <rect x="1120" y="122" width="84" height="176" rx="12" fill="#0F172A" stroke="#1E293B"/>
+    <rect x="1148" y="105" width="28" height="5" rx="2.5" fill="#334155"/>
+    <circle cx="1162" cy="307" r="7" fill="#1E293B" stroke="#334155"/>
+
+    <rect x="1138" y="146" width="48" height="48" rx="7" fill="#C4B5FD"/>
+    <rect x="1143" y="151" width="11" height="11" rx="2" fill="#090E1A"/>
+    <rect x="1170" y="151" width="11" height="11" rx="2" fill="#090E1A"/>
+    <rect x="1143" y="178" width="11" height="11" rx="2" fill="#090E1A"/>
+    <rect x="1159" y="166" width="7" height="7" rx="1.5" fill="#090E1A"/>
+    <rect x="1170" y="178" width="11" height="11" rx="2" fill="#090E1A"/>
+    <rect x="1163" y="182" width="5" height="5" rx="1" fill="#8B5CF6"/>
+
+    <text x="1162" y="224" fill="#E2E8F0" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="10" font-weight="600" text-anchor="middle" letter-spacing="1.1">SCAN</text>
+    <text x="1162" y="239" fill="#64748B" font-family="SF Pro Text, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="8" text-anchor="middle" letter-spacing="1">TO RECEIVE</text>
+    <rect x="1134" y="258" width="56" height="20" rx="10" fill="#111C33" stroke="#26324B"/>
+    <circle cx="1145" cy="268" r="3" fill="#22C55E"/>
+    <text x="1153" y="272" fill="#94A3B8" font-family="SF Mono, ui-monospace, monospace" font-size="7">ONLINE</text>
+  </g>
+
+  <path d="M1060 215H1110" stroke="#8B5CF6" stroke-width="1.5" stroke-dasharray="3 5"/>
+  <circle cx="1085" cy="215" r="17" fill="#0F172A" stroke="#7C3AED"/>
+  <rect x="1078" y="212" width="14" height="11" rx="3" stroke="#C4B5FD" stroke-width="1.4"/>
+  <path d="M1081.5 212V208.8C1081.5 205.6 1088.5 205.6 1088.5 208.8V212" stroke="#C4B5FD" stroke-width="1.4" stroke-linecap="round"/>
+  <text x="1085" y="254" fill="#A78BFA" font-family="SF Mono, ui-monospace, monospace" font-size="9" text-anchor="middle" letter-spacing="1.2">TLS</text>
+</svg>
