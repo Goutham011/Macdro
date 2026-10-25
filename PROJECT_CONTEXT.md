@@ -19,7 +19,7 @@ macOS 14+ menu-bar LAN transfer: share files/folders to a phone over LAN HTTPS +
 - `./scripts/build-release.sh` -> universal `dist/Macdro.app` + `dist/Macdro.dmg` + `.sha256`; honors signing/notary env
 - If Xcode reports a missing plugin: `xcodebuild -runFirstLaunch`
 
-CI `.github/workflows/ci.yml`: macOS 14 installs XcodeGen, runs `scripts/verify.sh`, bundles app. `.github/workflows/release.yml`: tag `v*` (or manual tag) verifies, builds the universal DMG, and publishes DMG + SHA-256 to GitHub Releases. `MACDRO_SIGNING_IDENTITY` (default `-`), optional `MACDRO_NOTARY_PROFILE`.
+CI `.github/workflows/ci.yml`: macOS 15 installs XcodeGen, runs `scripts/verify.sh`, bundles app. `.github/workflows/release.yml`: tag `v*` (or manual tag) verifies, builds the universal DMG, and publishes DMG + SHA-256 to GitHub Releases. `MACDRO_SIGNING_IDENTITY` (default `-`), optional `MACDRO_NOTARY_PROFILE`.
 
 ## Layout
 - `Sources/Macdro/`: UI. `MacdroApp` status item/popover; `AppModel` servers/session/network; `ContentView`, `CertificateSetupView`, `QRCode`.
@@ -82,4 +82,4 @@ Repo untracked in parent git; don't commit unless asked. `Macdro-Audit-Report.pd
 Routes/HTTP -> `HTTPIntegrationTests`; uploads/cleanup -> `SecurityHardeningTests`+`HardeningTests`; regressions -> `RegressionTests`; TLS/setup -> `SecurityHardeningTests`; limits -> `MacdroLimits` + tests; UI -> `Sources/Macdro`; web -> `MacdroSelfTest`+`HTTPIntegrationTests`; packaging -> `build-app.sh`.
 
 ## Gotchas
-`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`.
+`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. Dependencies are pinned (`swift-nio` 2.104.0, `swift-nio-ssl` 2.37.5, `swift-log` 1.6.2; `Package.resolved` holds compatible `swift-collections` 1.2.1/`swift-system` 1.4.0/`swift-atomics` 1.2.0). `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`.

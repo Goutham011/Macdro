@@ -11,9 +11,9 @@ let package = Package(
         .library(name: "MacdroKit", targets: ["MacdroKit"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
-        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.29.0"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0")
+        .package(url: "https://github.com/apple/swift-nio.git", exact: "2.104.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", exact: "2.37.5"),
+        .package(url: "https://github.com/apple/swift-log.git", exact: "1.6.2")
     ],
     targets: [
         .target(
