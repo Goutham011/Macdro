@@ -213,10 +213,10 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
         <body>
         <h1>Trust Macdro</h1>
         <p>Install the Macdro local certificate authority, then return to the QR code link. This setup server stops automatically in a few minutes.</p>
-        <p><a class="button" href="/ca.mobileconfig">Install on iPhone or iPad</a><a class="button" href="/ca.crt">Download CA certificate</a></p>
+        <p><a class="button" href="/ca.mobileconfig">iPhone/iPad profile</a><a class="button" href="/ca.crt">Android CA certificate</a></p>
         <h2>Verify this fingerprint</h2>
         <code>\(escapeHTML(fingerprint))</code>
-        <p class="note">The fingerprint must match the one shown in Macdro on your Mac. On iPhone or iPad, after installing the profile, enable full trust under Settings → General → About → Certificate Trust Settings. On Android, install the certificate as a CA certificate under Security → Encryption &amp; credentials.</p>
+        <p class="note">The fingerprint must match the one shown in Macdro on your Mac. On iPhone or iPad, install the profile, then enable full trust under Settings → General → About → Certificate Trust Settings. On Android, tap <strong>Android CA certificate</strong>—not the iPhone/iPad profile—then install it as a CA certificate under Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate. Use Chrome, not an in-app browser.</p>
         </body>
         </html>
         """

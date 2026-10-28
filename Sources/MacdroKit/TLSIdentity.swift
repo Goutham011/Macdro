@@ -327,7 +327,10 @@ public final class TLSIdentityManager: @unchecked Sendable {
     }
 
     public static func mobileConfiguration(caCertificateURL: URL, fingerprint: String) -> Data {
-        let certificateData = (try? Data(contentsOf: caCertificateURL)) ?? Data()
+        let certificateData = (try? NIOSSLCertificate.fromPEMFile(caCertificateURL.path).first)
+            .flatMap { try? $0.toDERBytes() }
+            .map(Data.init)
+            ?? Data()
         let identifier = "local.macdro.root.\(fingerprint.replacingOccurrences(of: ":", with: "").prefix(16))"
         let certificatePayload: [String: Any] = [
             "PayloadCertificateFileName": "Macdro Local CA.crt",

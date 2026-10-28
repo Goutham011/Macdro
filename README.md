@@ -9,7 +9,7 @@
 [![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-7C3AED?style=flat-square)](https://github.com/Goutham011/Macdro/releases/tag/v0.1.0)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white)
 ![Swift 5.10](https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white)
-[![79 tests](https://img.shields.io/badge/tests-79%20passing-16A34A?style=flat-square)](#testing)
+[![80 tests](https://img.shields.io/badge/tests-80%20passing-16A34A?style=flat-square)](#testing)
 ![No cloud](https://img.shields.io/badge/cloud-none-22C55E?style=flat-square)
 
 [Why Macdro](#why-macdro) · [Architecture](#architecture) · [Engineering](#engineering-highlights) · [Quick start](#quick-start) · [Testing](#testing) · [Roadmap](#status-and-roadmap)
@@ -73,13 +73,13 @@ flowchart LR
 | Area | Implementation |
 | :--- | :--- |
 | **Non-blocking networking** | Dedicated SwiftNIO event loops for the receiver and a separate temporary trust server; `NIOThreadPool` for blocking file hashing and archive work. |
-| **Backpressure under load** | Upload bodies are coalesced into 4 MiB writes, pending bytes are capped at 8 MiB, and channel reads pause/resume instead of growing memory without bound. |
+| **Backpressure under load** | Upload bodies are coalesced into 4 MiB writes, pending bytes are capped at 8 MiB, and channel reads pause/resume instead of growing memory without bound. TLS downloads and ZIPs stream in 256 KiB chunks with write-promise backpressure; loopback keeps `sendfile`. |
 | **Resumable protocol** | Client upload IDs, explicit offsets, `409` responses with `X-Upload-Offset`, server-side leases, completed-upload tombstones, and atomic `.part` → final renames. |
 | **Security engineering** | Loopback/LAN separation, private-address allowlist, constant-time session tokens, `HttpOnly`/`SameSite=Strict` cookies, CSP, path containment, symlink resolution, quotas, and rate limits. |
 | **HTTP correctness** | Exact `Content-Length`, HEAD without bodies, ETag-based conditional requests, byte ranges, and consistent `304`/`206`/`416` behavior. |
 | **TLS that a phone can trust** | OpenSSL-generated local CA and leaf certificates, `.mobileconfig` delivery, visible SHA-256 fingerprint, and TLS 1.2+ on the LAN listener. |
 | **Product engineering** | Transport chooser, QR pairing, no-network recovery, upload cancellation/retry, live progress, and a browser UI that degrades when optional APIs are missing. |
-| **Delivery discipline** | 79 XCTest cases, 71 self-test assertions, an audit harness, zero-warning verification, macOS CI, universal builds, and a tag-driven release workflow. |
+| **Delivery discipline** | 80 XCTest cases, 71 self-test assertions, an audit harness, zero-warning verification, macOS CI, universal builds, and a tag-driven release workflow. |
 
 ### The upload path
 
@@ -104,7 +104,7 @@ On a dropped connection, the browser asks the server for the committed offset an
 
 | Metric | Result |
 | :--- | :--- |
-| Automated tests | **79 passing** |
+| Automated tests | **80 passing** |
 | Self-test assertions | **71 passing** |
 | Compiler warnings | **0** |
 | Universal release DMG | **8.1 MB** |
@@ -166,13 +166,13 @@ No third-party frontend framework. No server-side database. No telemetry. No clo
 ## Testing
 
 ```bash
-swift test                    # 79 XCTest cases
+swift test                    # 80 XCTest cases
 swift run MacdroSelfTest      # 71 end-to-end assertions
 swift run MacdroAudit test    # raw HTTP / TLS / range / upload audit
 ./scripts/verify.sh           # clean build + all checks + Xcode build
 ```
 
-Coverage includes TLS/listener separation, token and cookie behavior, resumable uploads, quotas, symlink and traversal defenses, slowloris bounds, range fuzz cases, SHA-256 manifests, ZIP downloads, SSE heartbeats, and transport classification.
+Coverage includes TLS/listener separation, token and cookie behavior, resumable uploads, quotas, symlink and traversal defenses, slowloris bounds, range fuzz cases, SHA-256 manifests, TLS full/range/ZIP downloads, SSE heartbeats, and transport classification.
 
 `verify.sh` treats compiler warnings as failures. CI runs the same gate on macOS 15 with Swift 6.1.
 
@@ -183,7 +183,7 @@ Sources/Macdro/       Menu-bar app, SwiftUI views, connection state
 Sources/MacdroKit/    SwiftNIO server, uploads, TLS, archives, web assets
 Sources/MacdroSelfTest/  End-to-end self-test executable
 Sources/MacdroAudit/     Raw HTTP/TLS audit harness
-Tests/                79 XCTest cases
+Tests/                80 XCTest cases
 scripts/              App, universal DMG, and verification scripts
 .github/workflows/    CI and tag-driven GitHub Releases
 PROJECT_CONTEXT.md    Architecture, limits, invariants, and full file map
@@ -199,7 +199,7 @@ For the deeper design decisions, constraints, and build map, read [`PROJECT_CONT
 - [x] Zero-install browser client with live updates
 - [x] Resumable, parallel uploads and ZIP64 transfers
 - [x] Local CA trust flow for iPhone/iPad and Android
-- [x] 79 tests, self-test, audit, zero-warning CI
+- [x] 80 tests, self-test, audit, zero-warning CI
 - [x] Universal DMG release pipeline
 - [ ] Physical iPhone hotspot and Android NCM validation
 - [ ] Developer ID signing and notarization

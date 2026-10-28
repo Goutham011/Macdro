@@ -1445,22 +1445,13 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         }
         let response = HTTPResponseHead(version: request.version, status: .ok, headers: headers)
         context.write(self.wrapOutboundOut(.head(response)), promise: nil)
-
-        if request.method != .HEAD, size > 0 {
-            let region = FileRegion(
-                fileHandle: handle,
-                readerIndex: 0,
-                endIndex: Int(size)
-            )
-            context.write(self.wrapOutboundOut(.body(.fileRegion(region))), promise: nil)
-        }
-
-        context.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenComplete { _ in
-            try? handle.close()
-            if !request.isKeepAlive {
-                context.close(promise: nil)
-            }
-        }
+        sendFileBody(
+            handle: handle,
+            start: 0,
+            length: size,
+            context: context,
+            request: request
+        )
     }
 
     private func openFileHandle(at path: String) throws -> NIOFileHandle {
@@ -1632,19 +1623,75 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
 
         let responseHead = HTTPResponseHead(version: request.version, status: status, headers: headers)
         context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
+        sendFileBody(
+            handle: handle,
+            start: start,
+            length: length,
+            context: context,
+            request: request
+        )
+    }
 
-        if request.method != .HEAD, length > 0 {
-            let region = FileRegion(
-                fileHandle: handle,
-                readerIndex: Int(start),
-                endIndex: Int(end + 1)
-            )
-            context.write(self.wrapOutboundOut(.body(.fileRegion(region))), promise: nil)
+    private func sendFileBody(
+        handle: NIOFileHandle,
+        start: UInt64,
+        length: UInt64,
+        context: ChannelHandlerContext,
+        request: HTTPRequestHead
+    ) {
+        let keepAlive = request.isKeepAlive
+        guard request.method != .HEAD, length > 0 else {
+            Self.finishFileResponse(handle: handle, context: context, keepAlive: keepAlive)
+            return
         }
 
-        context.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenComplete { _ in
+        let region = FileRegion(
+            fileHandle: handle,
+            readerIndex: Int(start),
+            endIndex: Int(start + length)
+        )
+
+        if !isSecure {
+            context.write(self.wrapOutboundOut(.body(.fileRegion(region))), promise: nil)
+            Self.finishFileResponse(handle: handle, context: context, keepAlive: keepAlive)
+            return
+        }
+
+        let logger = self.logger
+        let fileIO = NonBlockingFileIO(threadPool: ioPool)
+        fileIO.readChunked(
+            fileRegion: region,
+            chunkSize: 256 * 1024,
+            allocator: context.channel.allocator,
+            eventLoop: context.eventLoop
+        ) { buffer in
+            context.writeAndFlush(
+                NIOAny(HTTPServerResponsePart.body(.byteBuffer(buffer)))
+            )
+        }.whenComplete { result in
+            switch result {
+            case .success:
+                Self.finishFileResponse(
+                    handle: handle,
+                    context: context,
+                    keepAlive: keepAlive
+                )
+            case .failure(let error):
+                logger.error("Could not stream file body: \(error)")
+                try? handle.close()
+                context.close(promise: nil)
+            }
+        }
+    }
+
+    private static func finishFileResponse(
+        handle: NIOFileHandle,
+        context: ChannelHandlerContext,
+        keepAlive: Bool
+    ) {
+        context.writeAndFlush(NIOAny(HTTPServerResponsePart.end(nil))).whenComplete { _ in
             try? handle.close()
-            if !request.isKeepAlive {
+            if !keepAlive {
                 context.close(promise: nil)
             }
         }

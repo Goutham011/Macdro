@@ -162,6 +162,43 @@ final class SecurityHardeningTests: XCTestCase {
         }
     }
 
+    func testLANHTTPSFileDownloadReturnsFullBody() async throws {
+        let payload = Data(repeating: 0x42, count: 2 * 1024 * 1024 + 123)
+        let source = directory.appendingPathComponent("large.bin")
+        try payload.write(to: source)
+        let file = SharedFile(
+            sourcePath: source.path,
+            relativePath: "large.bin",
+            size: UInt64(payload.count),
+            contentType: "application/octet-stream"
+        )
+        store.add([file])
+
+        var request = URLRequest(
+            url: httpsBase.appendingPathComponent("f/\(file.id.uuidString.lowercased())")
+        )
+        request.timeoutInterval = 15
+        let (data, response) = try await trustedSession.data(for: request)
+        let http = try XCTUnwrap(response as? HTTPURLResponse)
+        XCTAssertEqual(http.statusCode, 200)
+        XCTAssertEqual(http.value(forHTTPHeaderField: "Content-Length"), "\(payload.count)")
+        XCTAssertEqual(data, payload)
+
+        var rangeRequest = URLRequest(url: request.url!)
+        rangeRequest.setValue("bytes=100-999", forHTTPHeaderField: "Range")
+        let (rangeData, rangeResponse) = try await trustedSession.data(for: rangeRequest)
+        let rangeHTTP = try XCTUnwrap(rangeResponse as? HTTPURLResponse)
+        XCTAssertEqual(rangeHTTP.statusCode, 206)
+        XCTAssertEqual(rangeHTTP.value(forHTTPHeaderField: "Content-Range"), "bytes 100-999/\(payload.count)")
+        XCTAssertEqual(rangeData, payload.subdata(in: 100..<1000))
+
+        let (zipData, zipResponse) = try await trustedSession.data(
+            from: httpsBase.appendingPathComponent("api/zip")
+        )
+        XCTAssertEqual((zipResponse as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(Array(zipData.prefix(4)), [0x50, 0x4B, 0x03, 0x04])
+    }
+
     func testCertificateIsCAIssuedAndFingerprintMatches() throws {
         let identity = try identityManager.identity(for: ["127.0.0.1"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: identity.caCertificateURL.path))
@@ -175,7 +212,23 @@ final class SecurityHardeningTests: XCTestCase {
             .joined(separator: ":")
         XCTAssertEqual(identity.fingerprint, expected)
         XCTAssertFalse(identity.caCertificatePEM.isEmpty)
-        XCTAssertTrue(identity.mobileConfiguration.count > 100)
+
+        let profile = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(
+                from: identity.mobileConfiguration,
+                options: [],
+                format: nil
+            ) as? [String: Any]
+        )
+        let payloads = try XCTUnwrap(profile["PayloadContent"] as? [[String: Any]])
+        let certificatePayload = try XCTUnwrap(payloads.first)
+        XCTAssertEqual(certificatePayload["PayloadType"] as? String, "com.apple.security.root")
+        let installedCertificate = try XCTUnwrap(certificatePayload["PayloadContent"] as? Data)
+
+        let ca = try NIOSSLCertificate.fromPEMFile(identity.caCertificateURL.path).first
+        let expectedCA = Data(try XCTUnwrap(ca).toDERBytes())
+        XCTAssertEqual(installedCertificate, expectedCA)
+        XCTAssertEqual(Array(installedCertificate.prefix(2)), [0x30, 0x82])
     }
 
     func testRootDoesNotLeakTokenOrRedirect() async throws {
@@ -222,12 +275,34 @@ final class SecurityHardeningTests: XCTestCase {
         let html = String(decoding: pageData, as: UTF8.self)
         XCTAssertTrue(html.contains("Trust Macdro"))
         XCTAssertTrue(html.contains("Verify this fingerprint"))
+        XCTAssertTrue(html.contains("Android CA certificate"))
 
         let (caData, caResponse) = try await URLSession.shared.data(
             from: URL(string: "http://127.0.0.1:\(port)/ca.crt")!
         )
         XCTAssertEqual((caResponse as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertTrue(String(decoding: caData, as: UTF8.self).contains("BEGIN CERTIFICATE"))
+
+        let (profileData, profileResponse) = try await URLSession.shared.data(
+            from: URL(string: "http://127.0.0.1:\(port)/ca.mobileconfig")!
+        )
+        let profileHTTP = try XCTUnwrap(profileResponse as? HTTPURLResponse)
+        XCTAssertEqual(profileHTTP.statusCode, 200)
+        XCTAssertEqual(
+            profileHTTP.value(forHTTPHeaderField: "Content-Type"),
+            "application/x-apple-aspen-config"
+        )
+        let profile = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(
+                from: profileData,
+                options: [],
+                format: nil
+            ) as? [String: Any]
+        )
+        let payloads = try XCTUnwrap(profile["PayloadContent"] as? [[String: Any]])
+        let payload = try XCTUnwrap(payloads.first)
+        let certificate = try XCTUnwrap(payload["PayloadContent"] as? Data)
+        XCTAssertEqual(Array(certificate.prefix(2)), [0x30, 0x82])
 
         let (missing, missingResponse) = try await URLSession.shared.data(
             from: URL(string: "http://127.0.0.1:\(port)/api/session")!

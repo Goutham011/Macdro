@@ -39,7 +39,7 @@ Macdro is a local-first macOS menu-bar app for bidirectional file transfer with 
 
 ## Commands
 - `swift build`
-- `swift test` (~45 s, 79 tests; SSE ~18 s)
+- `swift test` (~47 s, 80 tests; SSE ~18 s)
 - `swift test --filter HardeningTests|SecurityHardeningTests|RegressionTests`
 - `swift run MacdroSelfTest` (71 checks)
 - `swift run MacdroAudit test|pre1970|serve <fixtures> <uploads> <port>`
@@ -81,7 +81,7 @@ Runtime certificate generation invokes `/usr/bin/openssl` with `OPENSSL_CONF=/et
 Vanilla HTML/CSS/JavaScript served from `Macdro_MacdroKit.bundle`; uses Fetch, EventSource/SSE with polling fallback, XMLHttpRequest upload progress, IndexedDB (`macdro-uploads`), Web Crypto (`randomUUID`/`getRandomValues` with fallback), and the Clipboard API with a legacy fallback. No npm, bundler, or external CDN.
 
 **Verification tools**
-XCTest for 79 tests; `MacdroSelfTest` (71 assertions) and `MacdroAudit` (`test`, `pre1970`, `serve`) are separate executables that exercise the running server, raw HTTP, TLS, ranges, uploads, quotas, and limits. They are not part of the shipping app bundle.
+XCTest for 80 tests; `MacdroSelfTest` (71 assertions) and `MacdroAudit` (`test`, `pre1970`, `serve`) are separate executables that exercise the running server, raw HTTP, TLS, ranges, uploads, quotas, and limits. They are not part of the shipping app bundle.
 
 ## Platforms and compatibility
 | Surface | Requirement / behavior |
@@ -221,14 +221,15 @@ Repository files (generated `.build/`, `dist/`, `Macdro.xcodeproj/`, and `Macdro
 5. `Content-Length` exact incl 0; HEAD no body; ETag `size-epochSeconds`; ranges/HEAD/304 consistent.
 6. `Date` -> `UInt64` only via `DateEpoch.seconds`; pre-1970/NaN/far-future clamp.
 7. Setup server only CA/trust, auto-stop, no token; refresh SANs on IP change.
+8. Never pass `IOData.fileRegion` through NIOSSL. TLS file/ZIP bodies must be streamed as ByteBuffers (256 KiB chunks); loopback may use `sendfile`.
 
 ## Limits
 Non-upload 1 MiB; headers 16 KiB field/32 KiB list/100; read+header timeout 30 s; connections 128/16 per IP; rejected drain 8 MiB; resumable TTL 15 min, cleanup 60 s, tombstones 10 min/4096; resumable 64/8 per client; uploads 32/4 per client; pending 8 MiB; upload write coalescing 4 MiB; file 16 GiB; total 64 GiB; reserved disk 32...512 MiB dynamic; clipboard 1 MiB; SSE 10 s/1 h; manifest 2 workers/5 min/64 MiB; ZIP 5 min/1 build/100k/64 GiB; rates/min ZIP 12, manifest 60, clipboard 60, upload 600.
 
-## State (2026-10-25)
-Clean SwiftPM build succeeds with zero compiler warnings; `swift test` 79/79; `MacdroSelfTest` 71/71; `MacdroAudit test` pass; debug app ad-hoc. XcodeGen project generates and `xcodebuild` Debug/Release succeeds; `Macdro_MacdroKit.bundle` is embedded. Release script produces universal `x86_64 arm64` app + verified ad-hoc DMG (`dist/Macdro.dmg`, ~8.0 MB). Private GitHub release `v0.1.0` published at https://github.com/Goutham011/Macdro/releases/tag/v0.1.0 with `Macdro.dmg` (8,131,270 bytes) + SHA-256; downloaded asset re-verified universal, version 0.1.0, web assets present, ad-hoc signature valid. `Info.plist` local-network text is phone-neutral; unused `_macdro._tcp` Bonjour declaration removed. Stale `.build/.lock` removed after SwiftPM PID 30103/87574 diagnostics. M0.2 fixed the idle-header timeout race: `HTTPHandler.sendRequestTimeout` now closes idle connections instead of emitting an invalid 408 into an idle HTTP pipeline.
+## State (2026-10-26)
+Clean SwiftPM build succeeds with zero compiler warnings; `swift test` 80/80; `MacdroSelfTest` 71/71; `MacdroAudit test` pass; debug app ad-hoc. XcodeGen project generates and `xcodebuild` Debug/Release succeeds; `Macdro_MacdroKit.bundle` is embedded. Release script produces universal `x86_64 arm64` app + verified ad-hoc DMG (`dist/Macdro.dmg`, ~8.0 MB). Private GitHub release `v0.1.0` published at https://github.com/Goutham011/Macdro/releases/tag/v0.1.0 with `Macdro.dmg` (8,131,270 bytes) + SHA-256; downloaded asset re-verified universal, version 0.1.0, web assets present, ad-hoc signature valid. `Info.plist` local-network text is phone-neutral; unused `_macdro._tcp` Bonjour declaration removed. Stale `.build/.lock` removed after SwiftPM PID 30103/87574 diagnostics. M0.2 fixed the idle-header timeout race: `HTTPHandler.sendRequestTimeout` now closes idle connections instead of emitting an invalid 408 into an idle HTTP pipeline. Post-release fix (2026-10-26) replaced TLS `FileRegion` responses with bounded ByteBuffer streaming; HTTPS file, range, and ZIP downloads now complete without crashing `NIOSSL`.
 
-Verified: 10 GiB loopback download 1.74 GB/s; 10 GiB upload 225 MB/s with SHA-256; 1,000 sequential abandoned uploads store-level no leak; 100 slowloris sockets bounded/closed; 32 MiB non-upload 413; pre-1970 200; 4 GiB range.
+Verified: 10 GiB loopback download 1.74 GB/s; 10 GiB upload 225 MB/s with SHA-256; 1,000 sequential abandoned uploads store-level no leak; 100 slowloris sockets bounded/closed; 32 MiB non-upload 413; pre-1970 200; 4 GiB range; 2 MiB HTTPS full/range/ZIP download regression.
 
 Not verified: multi-hour soak, 1,000 concurrent clients, physical iOS/Android, physical transport switching/sleep-wake, browser upload cancellation/retry on a real phone, Developer ID/notarization (`spctl` rejects ad-hoc).
 
@@ -268,9 +269,15 @@ Incremental changes from the existing codebase; no rewrite. Baseline was 67 test
 - CI and Release workflows both pass on GitHub; future `v*` tags publish new assets automatically.
 
 **Tests and docs**
-- Test suite grew from 67 to 79: 10 `NetworkInterfacesTests` plus two upload regression tests; self-test remains 71 checks.
+- Test suite grew from 67 to 80: 10 `NetworkInterfacesTests`, two upload regression tests, and a TLS full/range/ZIP download regression; self-test remains 71 checks.
 - `PROJECT_CONTEXT.md` now records the GitHub-release model, feature inventory, technology/dependency stack, platform matrix, data/state model, concepts, full file tree, release asset, package pins, and Swift 6.1 constraints.
 - Added `README.md` and `.github/assets/macdro-banner.svg` as a recruiter-facing project overview with a custom hero banner.
+
+**Post-release fix (2026-10-26)**
+- Fixed mobile/LAN HTTPS downloads that appeared to pause: `serveFile` and `serveTemporaryArchive` sent `FileRegion` to `HTTPResponseEncoder` and then `NIOSSLHandler`, which only accepts `ByteBuffer`; the server trapped in `NIOAny.forceAsByteBuffer` and the browser stalled. Loopback HTTP keeps `sendfile`; TLS now streams 256 KiB ByteBuffers with write-promise backpressure and closes the file handle on success/failure.
+- Added `SecurityHardeningTests.testLANHTTPSFileDownloadReturnsFullBody`: 2 MiB+ full download, byte-range 206, and ZIP over TLS. Full suite: 80/80.
+- Fixed the iOS trust profile: `.mobileconfig` certificate payloads were PEM bytes; `com.apple.security.root` requires DER. The profile now uses the CA certificate DER via `NIOSSLCertificate.toDERBytes()`, and the certificate test parses the generated plist and compares the installed payload with the CA DER.
+- Remaining validation: repeat the physical mobile download after relaunching the fixed build and reinstalling the regenerated trust profile.
 
 **Not changed / still open**
 - No native iOS/Android app, App Store listing, ADB, raw USB/MTP/AFC, or Sparkle update feed.
@@ -298,4 +305,4 @@ Incremental changes from the existing codebase; no rewrite. Baseline was 67 test
 Routes/HTTP -> `HTTPIntegrationTests`; uploads/cleanup -> `SecurityHardeningTests`+`HardeningTests`; regressions -> `RegressionTests`; transport selection -> `NetworkInterfacesTests`; TLS/setup -> `SecurityHardeningTests`; limits -> `MacdroLimits` + tests; UI -> `Sources/Macdro`; web -> `MacdroSelfTest`+`HTTPIntegrationTests`+`RegressionTests`; packaging -> `build-app.sh`.
 
 ## Gotchas
-`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. GitHub source is a standalone repo at `Goutham011/Macdro`; the parent home git repo must not be used. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. Dependencies are pinned (`swift-nio` 2.104.0, `swift-nio-ssl` 2.37.5, `swift-log` 1.6.2; `Package.resolved` holds compatible `swift-collections` 1.2.1/`swift-system` 1.4.0/`swift-atomics` 1.2.0). `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`.
+`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. GitHub source is a standalone repo at `Goutham011/Macdro`; the parent home git repo must not be used. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. Dependencies are pinned (`swift-nio` 2.104.0, `swift-nio-ssl` 2.37.5, `swift-log` 1.6.2; `Package.resolved` holds compatible `swift-collections` 1.2.1/`swift-system` 1.4.0/`swift-atomics` 1.2.0). `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`. Do not use `IOData.fileRegion` on the TLS listener; NIOSSL accepts only `ByteBuffer`, so stream TLS file/ZIP bodies in chunks. For iOS configuration profiles, `PayloadContent` for `com.apple.security.root` must be DER certificate bytes, not PEM.
