@@ -213,7 +213,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         cancelHeaderTimeout()
         cancelUploadIfNeeded(context: context)
         resetTransferState()
-        logger.error("HTTP connection error: \(error)")
+        logger.error("HTTP connection error ip=\(clientID): \(error)")
         context.close(promise: nil)
     }
 
@@ -1449,6 +1449,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
             handle: handle,
             start: 0,
             length: size,
+            label: "zip",
             context: context,
             request: request
         )
@@ -1610,7 +1611,6 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         headers.add(name: "Accept-Ranges", value: "bytes")
         headers.add(name: "ETag", value: etag)
         headers.add(name: "Cache-Control", value: "no-store")
-        headers.add(name: "X-Content-Type-Options", value: "nosniff")
         addSecurityHeaders(to: &headers, contentType: file.contentType)
         headers.add(name: "Content-Disposition", value: contentDisposition(for: file.name))
         headers.add(name: "Last-Modified", value: httpDate(modified))
@@ -1627,6 +1627,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
             handle: handle,
             start: start,
             length: length,
+            label: file.id.uuidString,
             context: context,
             request: request
         )
@@ -1636,12 +1637,24 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         handle: NIOFileHandle,
         start: UInt64,
         length: UInt64,
+        label: String,
         context: ChannelHandlerContext,
         request: HTTPRequestHead
     ) {
         let keepAlive = request.isKeepAlive
+        let remote = clientID
+        logger.info(
+            "download start ip=\(remote) target=\(label) offset=\(start) bytes=\(length) method=\(request.method.rawValue)"
+        )
         guard request.method != .HEAD, length > 0 else {
-            Self.finishFileResponse(handle: handle, context: context, keepAlive: keepAlive)
+            finishFileResponse(
+                handle: handle,
+                context: context,
+                keepAlive: keepAlive,
+                sent: 0,
+                label: label,
+                remote: remote
+            )
             return
         }
 
@@ -1653,7 +1666,14 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
 
         if !isSecure {
             context.write(self.wrapOutboundOut(.body(.fileRegion(region))), promise: nil)
-            Self.finishFileResponse(handle: handle, context: context, keepAlive: keepAlive)
+            finishFileResponse(
+                handle: handle,
+                context: context,
+                keepAlive: keepAlive,
+                sent: length,
+                label: label,
+                remote: remote
+            )
             return
         }
 
@@ -1671,25 +1691,34 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         }.whenComplete { result in
             switch result {
             case .success:
-                Self.finishFileResponse(
+                self.finishFileResponse(
                     handle: handle,
                     context: context,
-                    keepAlive: keepAlive
+                    keepAlive: keepAlive,
+                    sent: length,
+                    label: label,
+                    remote: remote
                 )
             case .failure(let error):
-                logger.error("Could not stream file body: \(error)")
+                logger.error(
+                    "download failed ip=\(remote) target=\(label) offset=\(start) expected=\(length) error=\(error)"
+                )
                 try? handle.close()
                 context.close(promise: nil)
             }
         }
     }
 
-    private static func finishFileResponse(
+    private func finishFileResponse(
         handle: NIOFileHandle,
         context: ChannelHandlerContext,
-        keepAlive: Bool
+        keepAlive: Bool,
+        sent: UInt64,
+        label: String,
+        remote: String
     ) {
-        context.writeAndFlush(NIOAny(HTTPServerResponsePart.end(nil))).whenComplete { _ in
+        context.writeAndFlush(NIOAny(HTTPServerResponsePart.end(nil))).whenComplete { [logger] _ in
+            logger.info("download done ip=\(remote) target=\(label) bytes=\(sent)")
             try? handle.close()
             if !keepAlive {
                 context.close(promise: nil)

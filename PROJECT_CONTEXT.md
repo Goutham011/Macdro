@@ -12,7 +12,7 @@ Macdro is a local-first macOS menu-bar app for bidirectional file transfer with 
 - QR code for the selected receiver URL; copy link; open the loopback receiver in a browser; open `~/Downloads/Macdro`; start a fresh session; quit.
 - Ephemeral sessions: a 32-byte hex path token plus a separate session cookie; **New Session** clears shares and rotates both. Multiple browsers can use the same session within connection limits.
 - Multi-interface connection chooser with transport labels (Wi-Fi, Ethernet, USB tethering, unknown), selected IP, no-network state, manual refresh, and automatic refresh on path changes.
-- Trust setup: a temporary LAN HTTP server (5 minutes) with QR/link, an iPhone/iPad `.mobileconfig`, a downloadable CA certificate for Android/desktop, and a SHA-256 certificate fingerprint. The setup server binds to the selected transport and serves only trust material.
+- Trust setup: a temporary LAN HTTP server (5 minutes) with QR/link, an iPhone/iPad `.mobileconfig`, a DER CA certificate (`/ca.der`) for Android plus PEM (`/ca.crt`) for desktop, and two SHA-256 fingerprints: the **CA fingerprint** (what a phone displays after install) and the server certificate fingerprint. The setup server binds to the selected transport and serves only trust material.
 - LAN HTTPS status, certificate fingerprint, and TLS error display; local HTTP receiver remains available even when LAN HTTPS is unavailable.
 
 **Phone / browser client**
@@ -39,7 +39,7 @@ Macdro is a local-first macOS menu-bar app for bidirectional file transfer with 
 
 ## Commands
 - `swift build`
-- `swift test` (~47 s, 80 tests; SSE ~18 s)
+- `swift test` (~41 s, 84 tests; SSE ~18 s)
 - `swift test --filter HardeningTests|SecurityHardeningTests|RegressionTests`
 - `swift run MacdroSelfTest` (71 checks)
 - `swift run MacdroAudit test|pre1970|serve <fixtures> <uploads> <port>`
@@ -49,7 +49,7 @@ Macdro is a local-first macOS menu-bar app for bidirectional file transfer with 
 - `xcodebuild -project Macdro.xcodeproj -scheme Macdro -configuration Debug -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build`
 - `./scripts/verify.sh [--no-clean] [--skip-xcode]` -> zero-warning build, tests, self-test, audit, XcodeGen/Xcode build
 - `./scripts/build-release.sh` -> universal `dist/Macdro.app` + `dist/Macdro.dmg` + `.sha256`; honors signing/notary env
-- `gh release view v0.1.0 -R Goutham011/Macdro`; tag push `v*` runs `.github/workflows/release.yml`
+- `gh release view v0.1.1 -R Goutham011/Macdro`; tag push `v*` runs `.github/workflows/release.yml`
 - If Xcode reports a missing plugin: `xcodebuild -runFirstLaunch`
 
 CI `.github/workflows/ci.yml`: macOS 15 installs XcodeGen, runs `scripts/verify.sh`, bundles app. `.github/workflows/release.yml`: tag `v*` (or manual tag) verifies, builds the universal DMG, and publishes DMG + SHA-256 to GitHub Releases. `MACDRO_SIGNING_IDENTITY` (default `-`), optional `MACDRO_NOTARY_PROFILE`.
@@ -81,7 +81,7 @@ Runtime certificate generation invokes `/usr/bin/openssl` with `OPENSSL_CONF=/et
 Vanilla HTML/CSS/JavaScript served from `Macdro_MacdroKit.bundle`; uses Fetch, EventSource/SSE with polling fallback, XMLHttpRequest upload progress, IndexedDB (`macdro-uploads`), Web Crypto (`randomUUID`/`getRandomValues` with fallback), and the Clipboard API with a legacy fallback. No npm, bundler, or external CDN.
 
 **Verification tools**
-XCTest for 80 tests; `MacdroSelfTest` (71 assertions) and `MacdroAudit` (`test`, `pre1970`, `serve`) are separate executables that exercise the running server, raw HTTP, TLS, ranges, uploads, quotas, and limits. They are not part of the shipping app bundle.
+XCTest for 84 tests; `MacdroSelfTest` (71 assertions) and `MacdroAudit` (`test`, `pre1970`, `serve`) are separate executables that exercise the running server, raw HTTP, TLS, ranges, uploads, quotas, and limits. They are not part of the shipping app bundle.
 
 ## Platforms and compatibility
 | Surface | Requirement / behavior |
@@ -105,7 +105,7 @@ XCTest for 80 tests; `MacdroSelfTest` (71 assertions) and `MacdroAudit` (`test`,
 - `HTTPHandler`: ~1.9k-line routes/transfer; grep paths.
 - `UploadStore`: streaming/resumable uploads, quotas, leases, TTL, orphan `.part`, path safety.
 - `SessionStore`: 32-byte token, `macdro_session` cookie, ordered files, auth/content generations.
-- `TLSIdentity`: CA+leaf, fingerprint, `.mobileconfig`; `~/Library/Application Support/Macdro/Identity`.
+- `TLSIdentity`: CA+leaf, leaf and CA fingerprints, SAN set (localhost/IPv4/mDNS), DER `.mobileconfig`; `~/Library/Application Support/Macdro/Identity`.
 - `SetupServer`: temp LAN HTTP trust server, 5 min, no token.
 - `Resources/Web/`: embedded client via `Bundle.module`.
 - `ManifestService`/`ArchiveService`/`ZipArchive`: SHA-256 manifest, streaming ZIP64, single-flight.
@@ -192,7 +192,7 @@ Repository files (generated `.build/`, `dist/`, `Macdro.xcodeproj/`, and `Macdro
 ## Data and state
 - In-memory only: shared-file list, order, session token, session cookie, auth/content generations, SSE subscribers, upload leases, and rate-limit windows. Quitting the app or starting a new session loses the share list and old links.
 - Received files: `~/Downloads/Macdro`, with nested relative paths preserved. Uploads use `.macdro-*.part` temporary files, atomic renames, quotas, and cleanup of expired/orphaned state.
-- TLS identity: `~/Library/Application Support/Macdro/Identity` contains `ca.crt`, `ca.key`, `leaf.crt`, `leaf.key`, and `leaf.sans`. Directory mode is `0700`; private keys/certificates are `0600`. The CA private key is not stored in Keychain. The displayed fingerprint is SHA-256 over the leaf DER.
+- TLS identity: `~/Library/Application Support/Macdro/Identity` contains `ca.crt`, `ca.key`, `leaf.crt`, `leaf.key`, and `leaf.sans`. Directory mode is `0700`; private keys/certificates are `0600`. The CA private key is not stored in Keychain. Two fingerprints are computed as SHA-256 over DER: the **CA fingerprint** (shown on the phone after install, and in the app/setup page) and the leaf/server fingerprint.
 - Browser state: IndexedDB database `macdro-uploads` stores upload resume IDs/offsets; no account data is stored.
 - Clipboard: reads/writes the macOS general pasteboard.
 - No app/server database, analytics, telemetry, cloud storage, or persistent share history (browser IndexedDB is only for upload resume state).
@@ -204,7 +204,7 @@ Repository files (generated `.build/`, `dist/`, `Macdro.xcodeproj/`, and `Macdro
 - Streaming and backpressure: bounded body buffering, coalesced 4 MiB upload writes, paused channel reads, and 8 MiB rejected-body drain.
 - Resumable upload protocol: client-supplied upload ID, explicit offsets, `409` with `X-Upload-Offset`, server-side leases/tombstones, and atomic completion.
 - HTTP correctness: exact `Content-Length`, HEAD without body, ETag `size-epoch`, conditional requests, byte ranges, and consistent 304/206/416 responses.
-- Local CA trust: OpenSSL-generated CA + leaf, CA delivered via `.mobileconfig`/PEM, SHA-256 fingerprint verification, and TLS 1.2+ on the LAN listener.
+- Local CA trust: OpenSSL-generated CA + leaf, CA delivered as DER in `.mobileconfig` (iOS) and `/ca.der` (Android) plus PEM at `/ca.crt` (desktop), CA fingerprint verification against what the phone displays, and TLS 1.2+ on the LAN listener.
 - Capability-style session auth: unguessable token in the URL path, constant-time comparison, `HttpOnly`/`SameSite=Strict` cookie (plus `Secure` on TLS), auth rotations, and no token in JSON or logs. Anyone with the link/cookie on an allowed network can transfer; there is no per-device approval.
 - Content integrity and archive generation: SHA-256 manifests, server-computed SHA-256 upload checksums, ZIP64 streaming with CRC32, single-flight caches, and TTLs.
 - Defense-in-depth HTTP headers: CSP, `X-Content-Type-Options: nosniff`, frame denial, and no-referrer policy.
@@ -222,16 +222,17 @@ Repository files (generated `.build/`, `dist/`, `Macdro.xcodeproj/`, and `Macdro
 6. `Date` -> `UInt64` only via `DateEpoch.seconds`; pre-1970/NaN/far-future clamp.
 7. Setup server only CA/trust, auto-stop, no token; refresh SANs on IP change.
 8. Never pass `IOData.fileRegion` through NIOSSL. TLS file/ZIP bodies must be streamed as ByteBuffers (256 KiB chunks); loopback may use `sendfile`.
+9. Trust material is never degraded silently: `.mobileconfig` payload is DER (never PEM), setup routes return 500 instead of an empty certificate, SAN entries are classified as `IP.` vs `DNS.` correctly, and the setup server serves the identity the LAN listener currently uses (refresh first, pass it in) so the displayed fingerprint matches the served certificate.
 
 ## Limits
 Non-upload 1 MiB; headers 16 KiB field/32 KiB list/100; read+header timeout 30 s; connections 128/16 per IP; rejected drain 8 MiB; resumable TTL 15 min, cleanup 60 s, tombstones 10 min/4096; resumable 64/8 per client; uploads 32/4 per client; pending 8 MiB; upload write coalescing 4 MiB; file 16 GiB; total 64 GiB; reserved disk 32...512 MiB dynamic; clipboard 1 MiB; SSE 10 s/1 h; manifest 2 workers/5 min/64 MiB; ZIP 5 min/1 build/100k/64 GiB; rates/min ZIP 12, manifest 60, clipboard 60, upload 600.
 
-## State (2026-10-26)
-Clean SwiftPM build succeeds with zero compiler warnings; `swift test` 80/80; `MacdroSelfTest` 71/71; `MacdroAudit test` pass; debug app ad-hoc. XcodeGen project generates and `xcodebuild` Debug/Release succeeds; `Macdro_MacdroKit.bundle` is embedded. Release script produces universal `x86_64 arm64` app + verified ad-hoc DMG (`dist/Macdro.dmg`, ~8.0 MB). Private GitHub release `v0.1.0` published at https://github.com/Goutham011/Macdro/releases/tag/v0.1.0 with `Macdro.dmg` (8,131,270 bytes) + SHA-256; downloaded asset re-verified universal, version 0.1.0, web assets present, ad-hoc signature valid. `Info.plist` local-network text is phone-neutral; unused `_macdro._tcp` Bonjour declaration removed. Stale `.build/.lock` removed after SwiftPM PID 30103/87574 diagnostics. M0.2 fixed the idle-header timeout race: `HTTPHandler.sendRequestTimeout` now closes idle connections instead of emitting an invalid 408 into an idle HTTP pipeline. Post-release fix (2026-10-26) replaced TLS `FileRegion` responses with bounded ByteBuffer streaming; HTTPS file, range, and ZIP downloads now complete without crashing `NIOSSL`.
+## State (2026-10-28)
+Clean SwiftPM build succeeds with zero compiler warnings; `swift test` 84/84; `MacdroSelfTest` 71/71; `MacdroAudit test` pass; `scripts/verify.sh` (build+tests+self-test+audit+XcodeGen+Xcode) pass; debug app ad-hoc. XcodeGen project generates and `xcodebuild` Debug/Release succeeds; `Macdro_MacdroKit.bundle` is embedded. Release script produces universal `x86_64 arm64` app + verified ad-hoc DMG (`dist/Macdro.dmg`, ~8.0 MB). Private GitHub release `v0.1.0` published at https://github.com/Goutham011/Macdro/releases/tag/v0.1.0 with `Macdro.dmg` (8,131,270 bytes) + SHA-256; downloaded asset re-verified universal, version 0.1.0, web assets present, ad-hoc signature valid. `Info.plist` local-network text is phone-neutral; unused `_macdro._tcp` Bonjour declaration removed. Stale `.build/.lock` removed after SwiftPM PID 30103/87574 diagnostics. M0.2 fixed the idle-header timeout race: `HTTPHandler.sendRequestTimeout` now closes idle connections instead of emitting an invalid 408 into an idle HTTP pipeline. Post-release fix (2026-10-26) replaced TLS `FileRegion` responses with bounded ByteBuffer streaming; HTTPS file, range, and ZIP downloads now complete without crashing `NIOSSL`. Trust-path fix (2026-10-28): the CA fingerprint (what iOS/Android displays) is now shown in the app and on the setup page, `/ca.der` serves the Android certificate, profile/CA failures return 500 instead of empty data, the setup server is handed the identity the LAN listener uses, SANs gained a validated mDNS name with correct `IP.`/`DNS.` classification, and SecTrust-based tests evaluate the served chain (positive + wrong-CA/wrong-hostname negatives). The file/ZIP download route logs `download start/done/failed` (client IP, target, offset, length) and connection errors log the client IP; those logs isolated the failing Android download to the phone's download component rejecting the CA at the TLS handshake (`certificate_unknown`) while page-context TLS succeeds, so the web client now saves files ≤ 512 MiB (and the ZIP within that cap) via in-page `fetch` → blob URL with progress instead of handing the URL to the download component — confirmed working on the Android phone (2026-10-28).
 
-Verified: 10 GiB loopback download 1.74 GB/s; 10 GiB upload 225 MB/s with SHA-256; 1,000 sequential abandoned uploads store-level no leak; 100 slowloris sockets bounded/closed; 32 MiB non-upload 413; pre-1970 200; 4 GiB range; 2 MiB HTTPS full/range/ZIP download regression.
+Verified: 10 GiB loopback download 1.74 GB/s; 10 GiB upload 225 MB/s with SHA-256; 1,000 sequential abandoned uploads store-level no leak; 100 slowloris sockets bounded/closed; 32 MiB non-upload 413; pre-1970 200; 4 GiB range; 2 MiB HTTPS full/range/ZIP download regression; served LAN certificate validates under `SecTrust` with the CA from the installed profile as anchor and fails for an unrelated CA or a non-SAN hostname/IP.
 
-Not verified: multi-hour soak, 1,000 concurrent clients, physical iOS/Android, physical transport switching/sleep-wake, browser upload cancellation/retry on a real phone, Developer ID/notarization (`spctl` rejects ad-hoc).
+Not verified: multi-hour soak, 1,000 concurrent clients, physical iOS (Android Wi-Fi download verified 2026-10-28), physical transport switching/sleep-wake, browser upload cancellation/retry on a real phone, Developer ID/notarization (`spctl` rejects ad-hoc), phone-side display of the CA fingerprint after a clean profile reinstall.
 
 Standalone git repo at `Goutham011/Macdro`; `Macdro-Audit-Report.pdf` stays untracked as historical Oct 22. No ADB/USB/native Android transport.
 
@@ -266,10 +267,11 @@ Incremental changes from the existing codebase; no rewrite. Baseline was 67 test
 **Distribution**
 - Moved the standalone project into the private repo `Goutham011/Macdro`; no App Store or committed DMG binary.
 - Published tag/release `v0.1.0` with `Macdro.dmg` (8,131,270 bytes) and `Macdro.dmg.sha256`; downloaded asset re-verified as universal `arm64/x86_64`, version 0.1.0, with web assets and a valid ad-hoc signature.
+- Tag/release `v0.1.1` (CFBundleShortVersionString 0.1.1, CFBundleVersion 2) bundles everything since v0.1.0: the DER trust profile + `caFingerprint` display + `/ca.der`/SAN/setup-race trust-path fixes, download-path logging, the Android in-page blob save (≤ 512 MiB), the `nosniff` dedupe, and docs; `.github/workflows/release.yml` verifies, builds, and publishes it on tag push.
 - CI and Release workflows both pass on GitHub; future `v*` tags publish new assets automatically.
 
 **Tests and docs**
-- Test suite grew from 67 to 80: 10 `NetworkInterfacesTests`, two upload regression tests, and a TLS full/range/ZIP download regression; self-test remains 71 checks.
+- Test suite grew from 67 to 80: 10 `NetworkInterfacesTests`, two upload regression tests, and a TLS full/range/ZIP download regression; four trust-path tests later raised it to 84; self-test remains 71 checks.
 - `PROJECT_CONTEXT.md` now records the GitHub-release model, feature inventory, technology/dependency stack, platform matrix, data/state model, concepts, full file tree, release asset, package pins, and Swift 6.1 constraints.
 - Added `README.md` and `.github/assets/macdro-banner.svg` as a recruiter-facing project overview with a custom hero banner.
 
@@ -278,6 +280,15 @@ Incremental changes from the existing codebase; no rewrite. Baseline was 67 test
 - Added `SecurityHardeningTests.testLANHTTPSFileDownloadReturnsFullBody`: 2 MiB+ full download, byte-range 206, and ZIP over TLS. Full suite: 80/80.
 - Fixed the iOS trust profile: `.mobileconfig` certificate payloads were PEM bytes; `com.apple.security.root` requires DER. The profile now uses the CA certificate DER via `NIOSSLCertificate.toDERBytes()`, and the certificate test parses the generated plist and compares the installed payload with the CA DER.
 - Remaining validation: repeat the physical mobile download after relaunching the fixed build and reinstalling the regenerated trust profile.
+
+**Trust-path diagnosis and fix (2026-10-28)**
+- Diagnosed the phone's "Not Secure / connection is not private" warning: the published `v0.1.0` DMG (built 2026-10-25 21:08) predates the DER profile fix, so a phone that installed its `.mobileconfig` received PEM bytes iOS cannot decode and therefore never gained trust; secondary causes were the skipped iOS "Enable Full Trust" toggle, a fingerprint display that showed the **leaf** while the phone shows the **CA**, IP-only SANs (no hostname coverage), a setup-server/leaf-regeneration race, and Android receiving PEM under a `.crt` name.
+- `TLSIdentity` now carries `caFingerprint` (SHA-256 of the CA DER) next to the leaf fingerprint; `AppModel`, `CertificateSetupView`, and the setup page show the CA fingerprint as the value to compare with the phone, with the server fingerprint secondary.
+- Setup server: added `/ca.der` (`application/pkix-cert`) for Android, kept `/ca.crt` PEM for desktop; all certificate routes and the page now fail with HTTP 500 (logged) instead of returning an empty certificate/profile; profile `PayloadIdentifier`/`PayloadUUID` are derived from the CA fingerprint so reinstalls replace the same profile instead of stacking duplicates; `start(host:preferredPort:identity:)` accepts the identity the LAN listener already uses, and `AppModel.startCertificateSetup` calls `refreshTLSIdentity()` first, closing the regeneration race.
+- SAN generation accepts validated DNS names in addition to IPv4, adds the Mac's mDNS hostname (`<computer>.local`, sanitized), and `sanLines` classifies entries as `DNS.`/`IP.` by actual IP-ness instead of treating every non-`localhost` value as an IP.
+- Added four tests: `testPhoneTrustPathValidatesServedCertificate` (SecTrust with the CA extracted from the generated profile as anchor validates the served chain over URLSession; an unrelated CA must fail), `testServedCertificatePassesHostnameChecks` (correct IP passes, non-SAN hostname and non-SAN IP fail), `testSubjectAlternativeNamesEncodeIPAndDNSEntries` (openssl `subjectAltName` contains `IP Address:`/`DNS:` correctly and rejects junk inputs), and `testSetupServerFailsLoudlyWhenCertificateMaterialIsMissing` (missing `ca.crt` yields HTTP 500 with no certificate bytes on every trust route). Full suite: 84/84.
+
+- Android-download diagnosis (2026-10-28, **resolved**): the instrumented server logs isolated the failure to the **TLS handshake**, not streaming: Chrome's download path on the phone sends `SSLV3_ALERT_CERTIFICATE_UNKNOWN` on every attempt while page-context TLS from the same phone succeeds in the same window (`uncleanShutdown` = established connection), so the phone's download component rejects the user-installed CA even though the browser context trusts it. The server chain is provably fine: CA-pinned `openssl verify`/live handshake against the running app returns `Verify return code: 0`, and the earlier Android-Chrome curl battery (1 GB CA-pinned transfer with matching SHA-256, `Range`/`If-Range`/HEAD, cancel+resume, keep-alive reuse, concurrent SSE) passed over LAN TLS. Fix: the web client now downloads files ≤ 512 MiB (and the ZIP when total ≤ 512 MiB) through in-page `fetch` with percentage progress, saved via a blob URL — data still traverses TLS, but inside the page's trust context, bypassing the download component's CA rejection; larger files keep the direct link, and fetch failures surface as an `offline` status. `download start/done/failed` logs with client IP distinguish an arriving-then-aborting request from one that never arrives; connection errors log the client IP. The duplicate `X-Content-Type-Options: nosniff` on file responses (explicit + `addSecurityHeaders`) was removed. Resolved on the physical Android phone: the blob path saves files and the download works (user-confirmed, 2026-10-28). Current CA fingerprint (for comparison against the phone's installed credential): SHA-256 `40:F7:40:8D:C7:88:24:87:65:00:51:64:EF:55:D6:4A:74:45:C6:AB:D8:58:16:F7:07:19:E9:3E:1A:E4:86:08`. Still unverified: behavior for files > 512 MiB on this phone (they keep the direct link, which the download component rejects).
 
 **Not changed / still open**
 - No native iOS/Android app, App Store listing, ADB, raw USB/MTP/AFC, or Sparkle update feed.
@@ -302,7 +313,7 @@ Incremental changes from the existing codebase; no rewrite. Baseline was 67 test
 - [ ] Beta feedback/rollback plan and signed update feed before public launch.
 
 ## Change map
-Routes/HTTP -> `HTTPIntegrationTests`; uploads/cleanup -> `SecurityHardeningTests`+`HardeningTests`; regressions -> `RegressionTests`; transport selection -> `NetworkInterfacesTests`; TLS/setup -> `SecurityHardeningTests`; limits -> `MacdroLimits` + tests; UI -> `Sources/Macdro`; web -> `MacdroSelfTest`+`HTTPIntegrationTests`+`RegressionTests`; packaging -> `build-app.sh`.
+Routes/HTTP -> `HTTPIntegrationTests`; uploads/cleanup -> `SecurityHardeningTests`+`HardeningTests`; regressions -> `RegressionTests`; transport selection -> `NetworkInterfacesTests`; TLS/setup/trust chain -> `SecurityHardeningTests`; limits -> `MacdroLimits` + tests; UI -> `Sources/Macdro`; web -> `MacdroSelfTest`+`HTTPIntegrationTests`+`RegressionTests`; packaging -> `build-app.sh`.
 
 ## Gotchas
-`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. GitHub source is a standalone repo at `Goutham011/Macdro`; the parent home git repo must not be used. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. Dependencies are pinned (`swift-nio` 2.104.0, `swift-nio-ssl` 2.37.5, `swift-log` 1.6.2; `Package.resolved` holds compatible `swift-collections` 1.2.1/`swift-system` 1.4.0/`swift-atomics` 1.2.0). `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`. Do not use `IOData.fileRegion` on the TLS listener; NIOSSL accepts only `ByteBuffer`, so stream TLS file/ZIP bodies in chunks. For iOS configuration profiles, `PayloadContent` for `com.apple.security.root` must be DER certificate bytes, not PEM.
+`swift test` uses temp dirs/ephemeral ports; don't hardcode. `HTTPHandler` is large: grep route/header. Web assets use `.copy("Resources/Web")`; missing bundle breaks packaging. `dist/Macdro.app` is universal and ad-hoc; `dist/Macdro.dmg` is not notarized. GitHub source is a standalone repo at `Goutham011/Macdro`; the parent home git repo must not be used. Publish `dist/Macdro.dmg` + `.sha256` as GitHub Release assets; `dist/` stays ignored. Dependencies are pinned (`swift-nio` 2.104.0, `swift-nio-ssl` 2.37.5, `swift-log` 1.6.2; `Package.resolved` holds compatible `swift-collections` 1.2.1/`swift-system` 1.4.0/`swift-atomics` 1.2.0). `SCNetworkServiceCopyAll` needs an `SCPreferences` handle; `build-app.sh` uses the selected Xcode toolchain (do not force CommandLineTools). `scripts/verify.sh` uses `.build/verify-spm` so clean verification does not erase `.build/xcode*`. Do not use `IOData.fileRegion` on the TLS listener; NIOSSL accepts only `ByteBuffer`, so stream TLS file/ZIP bodies in chunks. For iOS configuration profiles, `PayloadContent` for `com.apple.security.root` must be DER certificate bytes, not PEM (use `/ca.der` for Android, not `/ca.crt`). The phone displays the **CA** fingerprint, so the app and setup page must show `caFingerprint` as the comparison value; `fingerprint` is the leaf/server value. Don't regenerate an identity from the setup server while the LAN listener runs: call `MacdroServer.refreshTLSIdentity()` and pass `server.tlsIdentity` into `MacdroSetupServer.start`. The published `v0.1.0` DMG ships the PEM-profile bug — only `v0.1.1` and later should be handed to phones (tag push runs the release workflow; local `build-release.sh` output is for local testing only). Trust tests evaluate the served chain with `SecTrust` anchors rather than blanket-accepting, so regressions in chain, anchor, or SAN handling fail CI.

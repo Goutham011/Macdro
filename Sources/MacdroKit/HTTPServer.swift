@@ -91,6 +91,10 @@ public final class MacdroServer {
         tlsIdentity?.fingerprint
     }
 
+    public var caFingerprint: String? {
+        tlsIdentity?.caFingerprint
+    }
+
     public static var defaultUploadDirectory: URL {
         FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Macdro", isDirectory: true)

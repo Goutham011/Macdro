@@ -7,12 +7,15 @@ import NIOPosix
 public final class MacdroSetupServer {
     public enum SetupError: LocalizedError {
         case couldNotBind(underlying: Error)
+        case identityUnavailable(underlying: Error)
         case alreadyStopped
 
         public var errorDescription: String? {
             switch self {
             case .couldNotBind:
                 return "Could not start the certificate setup server."
+            case .identityUnavailable:
+                return "Could not load the Macdro certificate identity for the setup server."
             case .alreadyStopped:
                 return "The certificate setup server has already stopped. Open the trust setup again."
             }
@@ -48,7 +51,7 @@ public final class MacdroSetupServer {
     }
 
     @discardableResult
-    public func start(host: String = "0.0.0.0", preferredPort: Int = 0) throws -> Int {
+    public func start(host: String = "0.0.0.0", preferredPort: Int = 0, identity: TLSIdentity? = nil) throws -> Int {
         stateLock.lock()
         defer { stateLock.unlock() }
 
@@ -59,9 +62,17 @@ public final class MacdroSetupServer {
             throw SetupError.alreadyStopped
         }
 
+        let resolved: TLSIdentity
         do {
-            let identity = try identityManager.identity(for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress))
-            let handler = SetupHTTPHandler(identity: identity)
+            resolved = try identity ?? identityManager.identity(
+                for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress)
+            )
+        } catch {
+            throw SetupError.identityUnavailable(underlying: error)
+        }
+
+        do {
+            let handler = SetupHTTPHandler(identity: resolved, logger: logger)
             let channel = try ServerBootstrap(group: group)
                 .serverChannelOption(ChannelOptions.backlog, value: 64)
                 .serverChannelOption(ChannelOptions.socket(SOL_SOCKET, SO_REUSEADDR), value: 1)
@@ -133,10 +144,12 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
     typealias OutboundOut = HTTPServerResponsePart
 
     private let identity: TLSIdentity
+    private let logger: Logger
     private var head: HTTPRequestHead?
 
-    init(identity: TLSIdentity) {
+    init(identity: TLSIdentity, logger: Logger) {
         self.identity = identity
+        self.logger = logger
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -168,25 +181,54 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
 
         switch path {
         case "/", "/setup", "/setup/":
-            respond(context, head, status: .ok, type: "text/html; charset=utf-8", body: setupPage())
+            do {
+                let html = try setupPage()
+                respond(context, head, status: .ok, type: "text/html; charset=utf-8", body: html)
+            } catch {
+                respondCertificateFailure(context, head, error)
+            }
         case "/ca.crt":
-            respond(
-                context,
-                head,
-                status: .ok,
-                type: "application/x-x509-ca-cert",
-                body: Data(identity.caCertificatePEM.utf8),
-                extraHeaders: [("Content-Disposition", "attachment; filename=\"Macdro-Local-CA.crt\"")]
-            )
+            do {
+                let pem = try identity.caCertificatePEM()
+                respond(
+                    context,
+                    head,
+                    status: .ok,
+                    type: "application/x-x509-ca-cert",
+                    body: Data(pem.utf8),
+                    extraHeaders: [("Content-Disposition", "attachment; filename=\"Macdro-Local-CA.crt\"")]
+                )
+            } catch {
+                respondCertificateFailure(context, head, error)
+            }
+        case "/ca.der":
+            do {
+                let der = try identity.caCertificateDER()
+                respond(
+                    context,
+                    head,
+                    status: .ok,
+                    type: "application/pkix-cert",
+                    body: der,
+                    extraHeaders: [("Content-Disposition", "attachment; filename=\"Macdro-Local-CA.der\"")]
+                )
+            } catch {
+                respondCertificateFailure(context, head, error)
+            }
         case "/ca.mobileconfig":
-            respond(
-                context,
-                head,
-                status: .ok,
-                type: "application/x-apple-aspen-config",
-                body: identity.mobileConfiguration,
-                extraHeaders: [("Content-Disposition", "attachment; filename=\"Macdro-Local-Network.mobileconfig\"")]
-            )
+            do {
+                let profile = try identity.mobileConfiguration()
+                respond(
+                    context,
+                    head,
+                    status: .ok,
+                    type: "application/x-apple-aspen-config",
+                    body: profile,
+                    extraHeaders: [("Content-Disposition", "attachment; filename=\"Macdro-Local-Network.mobileconfig\"")]
+                )
+            } catch {
+                respondCertificateFailure(context, head, error)
+            }
         case "/health":
             respond(context, head, status: .ok, type: "text/plain; charset=utf-8", body: Data("ok\n".utf8))
         default:
@@ -194,8 +236,23 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
         }
     }
 
-    private func setupPage() -> Data {
-        let fingerprint = identity.fingerprint
+    private func respondCertificateFailure(
+        _ context: ChannelHandlerContext,
+        _ request: HTTPRequestHead,
+        _ error: Error
+    ) {
+        logger.error("Certificate setup route failed: \(error)")
+        respond(
+            context,
+            request,
+            status: .internalServerError,
+            type: "text/plain; charset=utf-8",
+            body: Data("Certificate unavailable on the Mac. Reopen the trust setup in Macdro.\n".utf8)
+        )
+    }
+
+    private func setupPage() throws -> Data {
+        _ = try identity.caCertificatePEM()
         let html = """
         <!doctype html>
         <html lang="en">
@@ -206,6 +263,7 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
         <style>
         :root{color-scheme:dark light}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:34rem;margin:0 auto;padding:2rem 1.25rem;line-height:1.5}
         code{overflow-wrap:anywhere;background:rgba(127,127,127,.15);padding:.5rem;border-radius:.5rem;display:block}
+        h2{margin-top:1.5rem}
         a.button{display:inline-block;margin:.4rem .4rem .4rem 0;padding:.7rem 1rem;border-radius:.65rem;background:#5b3df5;color:#fff;text-decoration:none}
         .note{opacity:.72;font-size:.92rem}
         </style>
@@ -213,10 +271,13 @@ private final class SetupHTTPHandler: ChannelInboundHandler {
         <body>
         <h1>Trust Macdro</h1>
         <p>Install the Macdro local certificate authority, then return to the QR code link. This setup server stops automatically in a few minutes.</p>
-        <p><a class="button" href="/ca.mobileconfig">iPhone/iPad profile</a><a class="button" href="/ca.crt">Android CA certificate</a></p>
+        <p><a class="button" href="/ca.mobileconfig">iPhone/iPad profile</a><a class="button" href="/ca.der">Android CA certificate</a></p>
         <h2>Verify this fingerprint</h2>
-        <code>\(escapeHTML(fingerprint))</code>
-        <p class="note">The fingerprint must match the one shown in Macdro on your Mac. On iPhone or iPad, install the profile, then enable full trust under Settings → General → About → Certificate Trust Settings. On Android, tap <strong>Android CA certificate</strong>—not the iPhone/iPad profile—then install it as a CA certificate under Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate. Use Chrome, not an in-app browser.</p>
+        <p class="note">This is the <strong>CA fingerprint</strong>. After installing, your phone shows this same value, and it must match the fingerprint shown in Macdro on your Mac:</p>
+        <code>\(escapeHTML(identity.caFingerprint))</code>
+        <p class="note">Server certificate for this connection (the phone does not show this value):</p>
+        <code>\(escapeHTML(identity.fingerprint))</code>
+        <p class="note">On iPhone or iPad, install the profile, then enable full trust under Settings &rarr; General &rarr; About &rarr; Certificate Trust Settings. On Android, tap <strong>Android CA certificate</strong>, not the iPhone/iPad profile, then install it as a CA certificate under Settings &rarr; Security &rarr; Encryption &amp; credentials &rarr; Install a certificate &rarr; CA certificate. Use Chrome, not an in-app browser.</p>
         </body>
         </html>
         """

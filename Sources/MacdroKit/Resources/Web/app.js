@@ -13,10 +13,62 @@
     const template = document.getElementById("file-template");
     const downloadAll = document.getElementById("download-all");
     downloadAll.href = `${base}/api/zip`;
+    downloadAll.addEventListener("click", (event) => {
+        if (totalBytes > BLOB_DOWNLOAD_LIMIT) return;
+        event.preventDefault();
+        downloadWithFallback(downloadAll.href, "Macdro.zip");
+    });
 
     let lastSignature = "";
     let polling = null;
     let eventSource = null;
+    let totalBytes = 0;
+    let downloadActive = false;
+
+    const BLOB_DOWNLOAD_LIMIT = 512 * 1024 * 1024;
+
+    const downloadViaBlob = async (url, name) => {
+        downloadActive = true;
+        try {
+            setStatus("online", `Downloading ${name}…`);
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const total = Number(response.headers.get("content-length")) || 0;
+            const reader = response.body.getReader();
+            const chunks = [];
+            let received = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                received += value.length;
+                if (total > 0) {
+                    const percent = Math.min(100, Math.round((received / total) * 100));
+                    setStatus("online", `Downloading ${name} · ${percent}%`);
+                }
+            }
+            const blob = new Blob(chunks, {
+                type: response.headers.get("content-type") || "application/octet-stream"
+            });
+            const objectUrl = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = objectUrl;
+            anchor.download = name;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+            setStatus("online", `Saved ${name}`);
+        } finally {
+            downloadActive = false;
+        }
+    };
+
+    const downloadWithFallback = (url, name) => {
+        downloadViaBlob(url, name).catch((error) => {
+            setStatus("offline", `Download failed: ${error && error.message ? error.message : error}`);
+        });
+    };
 
     const formatBytes = (value) => {
         if (!Number.isFinite(value) || value < 0) return "—";
@@ -46,13 +98,19 @@
         const link = row.querySelector(".download");
         link.href = `${base}/f/${file.id}`;
         link.setAttribute("download", file.name);
+        link.addEventListener("click", (event) => {
+            if (file.size > BLOB_DOWNLOAD_LIMIT) return;
+            event.preventDefault();
+            downloadWithFallback(link.href, file.name);
+        });
         return row;
     };
 
     const render = (session) => {
         const files = Array.isArray(session.files) ? session.files : [];
         const signature = signatureFor(files);
-        setStatus("online", "Connected to Mac");
+        totalBytes = session.totalBytes || 0;
+        if (!downloadActive) setStatus("online", "Connected to Mac");
 
         fileCount.textContent = String(files.length);
         downloadAll.classList.toggle("hidden", files.length === 0);

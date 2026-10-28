@@ -72,13 +72,13 @@ struct CertificateSetupView: View {
                 .frame(height: 176)
             }
 
-            if let fingerprint = model.tlsFingerprint {
+            if let caFingerprint = model.caFingerprint {
                 VStack(spacing: 4) {
-                    Text("CERTIFICATE FINGERPRINT")
+                    Text("CA FINGERPRINT · SHOWN ON YOUR PHONE")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .tracking(0.7)
-                    Text(fingerprint)
+                    Text(caFingerprint)
                         .font(.system(size: 9.5, design: .monospaced))
                         .textSelection(.enabled)
                         .multilineTextAlignment(.center)
@@ -86,6 +86,22 @@ struct CertificateSetupView: View {
                 .padding(10)
                 .frame(maxWidth: .infinity)
                 .background(.background.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            if let fingerprint = model.tlsFingerprint {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("SERVER CERTIFICATE")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.7)
+                    Text(fingerprint)
+                        .font(.system(size: 9, design: .monospaced))
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.background.opacity(0.2), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 7) {

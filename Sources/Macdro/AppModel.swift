@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var setupURL: URL?
     @Published private(set) var tlsFingerprint: String?
+    @Published private(set) var caFingerprint: String?
     @Published private(set) var tlsError: String?
     @Published private(set) var connectionOptions: [NetworkInterfaces.ConnectionOption] = []
     @Published var selectedURL: URL?
@@ -134,11 +135,23 @@ final class AppModel: ObservableObject {
             return
         }
         setupServer?.stop()
+        if let server {
+            do {
+                try server.refreshTLSIdentity()
+                tlsError = server.lanError?.localizedDescription
+            } catch {
+                tlsError = error.localizedDescription
+            }
+        }
         setupServer = MacdroSetupServer(identityManager: server?.tlsIdentityManager ?? TLSIdentityManager())
         do {
-            let setupPort = try setupServer?.start(host: connection.address.ipAddress) ?? 0
+            let setupPort = try setupServer?.start(
+                host: connection.address.ipAddress,
+                identity: server?.tlsIdentity
+            ) ?? 0
             setupURL = connection.setupURL(port: setupPort)
             tlsFingerprint = server?.tlsFingerprint
+            caFingerprint = server?.caFingerprint
         } catch {
             errorMessage = error.localizedDescription
             setupURL = nil
@@ -185,6 +198,7 @@ final class AppModel: ObservableObject {
             port = try server.start()
             lanPort = server.lanPort
             tlsFingerprint = server.tlsFingerprint
+            caFingerprint = server.caFingerprint
             tlsError = server.lanError?.localizedDescription
             self.server = server
             status = .ready
@@ -234,6 +248,7 @@ final class AppModel: ObservableObject {
         }
         lanPort = server.lanPort
         tlsFingerprint = server.tlsFingerprint
+        caFingerprint = server.caFingerprint
 
         let token = store.token
         let options = NetworkInterfaces.connectionOptions()

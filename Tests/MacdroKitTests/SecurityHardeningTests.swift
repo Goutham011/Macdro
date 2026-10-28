@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import NIOSSL
+import Security
 import XCTest
 @testable import MacdroKit
 
@@ -15,6 +16,50 @@ private final class InsecureTestTrustDelegate: NSObject, URLSessionDelegate, @un
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+}
+
+private final class AnchoredTrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+    private let anchors: [SecCertificate]
+    private let lock = NSLock()
+    private var didValidate = false
+
+    init(anchors: [SecCertificate]) {
+        self.anchors = anchors
+    }
+
+    var validated: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didValidate
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust
+        else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        SecTrustSetAnchorCertificates(trust, anchors as CFArray)
+        SecTrustSetAnchorCertificatesOnly(trust, true)
+        SecTrustSetPolicies(
+            trust,
+            SecPolicyCreateSSL(true, challenge.protectionSpace.host as CFString)
+        )
+        var error: CFError?
+        guard SecTrustEvaluateWithError(trust, &error) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        lock.lock()
+        didValidate = true
+        lock.unlock()
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
 }
@@ -211,11 +256,15 @@ final class SecurityHardeningTests: XCTestCase {
             .map { String(format: "%02X", $0) }
             .joined(separator: ":")
         XCTAssertEqual(identity.fingerprint, expected)
-        XCTAssertFalse(identity.caCertificatePEM.isEmpty)
+        XCTAssertFalse(try identity.caCertificatePEM().isEmpty)
+        XCTAssertNotEqual(identity.caFingerprint, identity.fingerprint)
+        XCTAssertTrue(identity.caFingerprint.contains(":"))
 
+        let profileData = try identity.mobileConfiguration()
+        XCTAssertEqual(profileData, try identity.mobileConfiguration())
         let profile = try XCTUnwrap(
             try PropertyListSerialization.propertyList(
-                from: identity.mobileConfiguration,
+                from: profileData,
                 options: [],
                 format: nil
             ) as? [String: Any]
@@ -229,6 +278,147 @@ final class SecurityHardeningTests: XCTestCase {
         let expectedCA = Data(try XCTUnwrap(ca).toDERBytes())
         XCTAssertEqual(installedCertificate, expectedCA)
         XCTAssertEqual(Array(installedCertificate.prefix(2)), [0x30, 0x82])
+    }
+
+    func testPhoneTrustPathValidatesServedCertificate() async throws {
+        let identity = try XCTUnwrap(server.tlsIdentity)
+        let profileData = try identity.mobileConfiguration()
+        let profile = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(
+                from: profileData,
+                options: [],
+                format: nil
+            ) as? [String: Any]
+        )
+        let payloads = try XCTUnwrap(profile["PayloadContent"] as? [[String: Any]])
+        let payload = try XCTUnwrap(payloads.first?["PayloadContent"] as? Data)
+        let anchor = try XCTUnwrap(SecCertificateCreateWithData(nil, payload as CFData))
+
+        let anchoredDelegate = AnchoredTrustDelegate(anchors: [anchor])
+        let trusted = URLSession(
+            configuration: .ephemeral,
+            delegate: anchoredDelegate,
+            delegateQueue: nil
+        )
+        defer { trusted.invalidateAndCancel() }
+
+        let (data, response) = try await trusted.data(
+            from: URL(string: "https://127.0.0.1:\(server.lanPort)/health")!
+        )
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "ok\n")
+        XCTAssertTrue(anchoredDelegate.validated, "the served chain must validate against the installed CA")
+
+        let foreign = try TLSIdentityManager(
+            directory: directory.appendingPathComponent("foreign-identity")
+        ).identity(for: ["127.0.0.1"])
+        let foreignAnchor = try XCTUnwrap(
+            SecCertificateCreateWithData(nil, foreign.caCertificateDER() as CFData)
+        )
+        let foreignDelegate = AnchoredTrustDelegate(anchors: [foreignAnchor])
+        let untrusted = URLSession(
+            configuration: .ephemeral,
+            delegate: foreignDelegate,
+            delegateQueue: nil
+        )
+        defer { untrusted.invalidateAndCancel() }
+
+        do {
+            _ = try await untrusted.data(
+                from: URL(string: "https://127.0.0.1:\(server.lanPort)/health")!
+            )
+            XCTFail("A certificate signed by an unrelated CA must not validate")
+        } catch {
+            XCTAssertFalse(foreignDelegate.validated)
+        }
+    }
+
+    func testServedCertificatePassesHostnameChecks() throws {
+        let identity = try XCTUnwrap(server.tlsIdentity)
+        let chain = [
+            try XCTUnwrap(SecCertificateCreateWithData(
+                nil,
+                TLSIdentityManager.certificateDER(fromPEM: identity.certificateURL) as CFData
+            )),
+            try XCTUnwrap(SecCertificateCreateWithData(
+                nil,
+                identity.caCertificateDER() as CFData
+            ))
+        ]
+
+        XCTAssertTrue(
+            try evaluates(chain: chain, anchor: chain.last, hostname: "127.0.0.1"),
+            "the served certificate must validate for its IP SAN"
+        )
+        XCTAssertFalse(
+            try evaluates(chain: chain, anchor: chain.last, hostname: "not-macdro.example"),
+            "a hostname outside the SAN list must fail"
+        )
+        XCTAssertFalse(
+            try evaluates(chain: chain, anchor: chain.last, hostname: "192.0.2.10"),
+            "an IP address outside the SAN list must fail"
+        )
+    }
+
+    private func evaluates(
+        chain: [SecCertificate],
+        anchor: SecCertificate?,
+        hostname: String
+    ) throws -> Bool {
+        var trust: SecTrust?
+        let status = SecTrustCreateWithCertificates(
+            chain as CFArray,
+            SecPolicyCreateSSL(true, hostname as CFString),
+            &trust
+        )
+        guard status == errSecSuccess, let trust else {
+            throw POSIXError(.EIO)
+        }
+        if let anchor {
+            SecTrustSetAnchorCertificates(trust, [anchor] as CFArray)
+            SecTrustSetAnchorCertificatesOnly(trust, true)
+        }
+        var error: CFError?
+        return SecTrustEvaluateWithError(trust, &error)
+    }
+
+    func testSubjectAlternativeNamesEncodeIPAndDNSEntries() throws {
+        let identity = try identityManager.identity(
+            for: ["192.0.2.10", "macdro-test.example", "192.168.1", "not an ip"]
+        )
+        let sans = identity.subjectAlternativeNames
+        XCTAssertTrue(sans.contains("192.0.2.10"))
+        XCTAssertTrue(sans.contains("macdro-test.example"))
+        XCTAssertTrue(sans.contains("localhost"))
+        XCTAssertFalse(sans.contains("192.168.1"), "an incomplete IPv4 literal must be rejected")
+        XCTAssertFalse(sans.contains("not an ip"))
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/openssl")
+        process.arguments = ["x509", "-in", identity.certificateURL.path, "-noout", "-text"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        let text = String(
+            decoding: output.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, text)
+
+        let lines = text.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(where: { $0.contains("Subject Alternative Name") }) else {
+            XCTFail("leaf certificate has no subjectAltName extension:\n\(text)")
+            return
+        }
+        let extensionLine = lines.dropFirst(index + 1).prefix(3).joined(separator: " ")
+        XCTAssertTrue(extensionLine.contains("DNS:localhost"), extensionLine)
+        XCTAssertTrue(extensionLine.contains("DNS:macdro-test.example"), extensionLine)
+        XCTAssertTrue(extensionLine.contains("IP Address:192.0.2.10"), extensionLine)
+        XCTAssertTrue(extensionLine.contains("IP Address:127.0.0.1"), extensionLine)
+        XCTAssertFalse(extensionLine.contains("IP Address:macdro-test.example"), extensionLine)
+        XCTAssertFalse(extensionLine.contains("DNS:192.168.1"), extensionLine)
     }
 
     func testRootDoesNotLeakTokenOrRedirect() async throws {
@@ -262,6 +452,9 @@ final class SecurityHardeningTests: XCTestCase {
     }
 
     func testSetupServerServesOnlyCertificateMaterialAndStops() async throws {
+        let identity = try identityManager.identity(
+            for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress)
+        )
         let setup = MacdroSetupServer(
             identityManager: identityManager,
             lifetime: 30
@@ -276,12 +469,27 @@ final class SecurityHardeningTests: XCTestCase {
         XCTAssertTrue(html.contains("Trust Macdro"))
         XCTAssertTrue(html.contains("Verify this fingerprint"))
         XCTAssertTrue(html.contains("Android CA certificate"))
+        XCTAssertTrue(html.contains("CA fingerprint"))
+        XCTAssertTrue(html.contains(identity.caFingerprint), "setup page must show the CA fingerprint")
+        XCTAssertTrue(html.contains(identity.fingerprint))
+        XCTAssertFalse(html.contains("PRIVATE KEY"), "setup page must not serve key material")
 
         let (caData, caResponse) = try await URLSession.shared.data(
             from: URL(string: "http://127.0.0.1:\(port)/ca.crt")!
         )
         XCTAssertEqual((caResponse as? HTTPURLResponse)?.statusCode, 200)
         XCTAssertTrue(String(decoding: caData, as: UTF8.self).contains("BEGIN CERTIFICATE"))
+
+        let (derData, derResponse) = try await URLSession.shared.data(
+            from: URL(string: "http://127.0.0.1:\(port)/ca.der")!
+        )
+        XCTAssertEqual((derResponse as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(
+            (derResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
+            "application/pkix-cert"
+        )
+        XCTAssertEqual(Array(derData.prefix(2)), [0x30, 0x82])
+        XCTAssertEqual(derData, try identity.caCertificateDER())
 
         let (profileData, profileResponse) = try await URLSession.shared.data(
             from: URL(string: "http://127.0.0.1:\(port)/ca.mobileconfig")!
@@ -379,6 +587,28 @@ final class SecurityHardeningTests: XCTestCase {
         request.httpBody = Data(repeating: 0x41, count: MacdroLimits.maxClipboardBytes + 1)
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 413)
+    }
+
+    func testSetupServerFailsLoudlyWhenCertificateMaterialIsMissing() async throws {
+        let identity = try identityManager.identity(
+            for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress)
+        )
+        try FileManager.default.removeItem(at: identity.caCertificateURL)
+
+        let setup = MacdroSetupServer(identityManager: identityManager, lifetime: 30)
+        let port = try setup.start(host: "127.0.0.1", identity: identity)
+        defer { setup.stop() }
+
+        for path in ["/ca.mobileconfig", "/ca.der", "/ca.crt", "/setup"] {
+            let (data, response) = try await URLSession.shared.data(
+                from: URL(string: "http://127.0.0.1:\(port)\(path)")!
+            )
+            let http = try XCTUnwrap(response as? HTTPURLResponse)
+            XCTAssertEqual(http.statusCode, 500, path)
+            let text = String(decoding: data, as: UTF8.self)
+            XCTAssertTrue(text.contains("Certificate unavailable"), path)
+            XCTAssertFalse(text.contains("BEGIN CERTIFICATE"), path)
+        }
     }
 
     func testSetupServerAutoStopsWithoutDeadlocking() async throws {

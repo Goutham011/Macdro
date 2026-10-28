@@ -26,14 +26,27 @@ public struct TLSIdentity: Sendable {
     public let certificateURL: URL
     public let privateKeyURL: URL
     public let fingerprint: String
+    public let caFingerprint: String
     public let subjectAlternativeNames: [String]
 
-    public var caCertificatePEM: String {
-        (try? String(contentsOf: caCertificateURL, encoding: .utf8)) ?? ""
+    public func caCertificatePEM() throws -> String {
+        guard let pem = try? String(contentsOf: caCertificateURL, encoding: .utf8),
+              pem.contains("BEGIN CERTIFICATE")
+        else {
+            throw TLSIdentityError.missingCertificate
+        }
+        return pem
     }
 
-    public var mobileConfiguration: Data {
-        TLSIdentityManager.mobileConfiguration(caCertificateURL: caCertificateURL, fingerprint: fingerprint)
+    public func caCertificateDER() throws -> Data {
+        try TLSIdentityManager.certificateDER(fromPEM: caCertificateURL)
+    }
+
+    public func mobileConfiguration() throws -> Data {
+        try TLSIdentityManager.mobileConfiguration(
+            caCertificateURL: caCertificateURL,
+            fingerprint: caFingerprint
+        )
     }
 
     public func makeServerConfiguration() throws -> TLSConfiguration {
@@ -135,6 +148,7 @@ public final class TLSIdentityManager: @unchecked Sendable {
         }
 
         let fingerprint = try Self.fingerprint(certificateURL: leafCert)
+        let caFingerprint = try Self.fingerprint(certificateURL: caCert)
         return TLSIdentity(
             directory: directory,
             caCertificateURL: caCert,
@@ -142,6 +156,7 @@ public final class TLSIdentityManager: @unchecked Sendable {
             certificateURL: leafCert,
             privateKeyURL: leafKey,
             fingerprint: fingerprint,
+            caFingerprint: caFingerprint,
             subjectAlternativeNames: sans
         )
     }
@@ -236,17 +251,21 @@ public final class TLSIdentityManager: @unchecked Sendable {
     }
 
     private func sanLines(_ sans: [String]) -> String {
-        var lines: [String] = []
-        var dnsIndex = 1
-        var ipIndex = 1
+        var dnsNames: [String] = []
+        var ipAddresses: [String] = []
         for value in sans {
-            if value == "localhost" {
-                lines.append("DNS.\(dnsIndex) = localhost")
-                dnsIndex += 1
+            if Self.isValidIPv4(value) {
+                ipAddresses.append(value)
             } else {
-                lines.append("IP.\(ipIndex) = \(value)")
-                ipIndex += 1
+                dnsNames.append(value)
             }
+        }
+        var lines: [String] = []
+        for (index, name) in dnsNames.enumerated() {
+            lines.append("DNS.\(index + 1) = \(name)")
+        }
+        for (index, address) in ipAddresses.enumerated() {
+            lines.append("IP.\(index + 1) = \(address)")
         }
         return lines.joined(separator: "\n")
     }
@@ -283,12 +302,14 @@ public final class TLSIdentityManager: @unchecked Sendable {
 
     private static func subjectAlternativeNames(addresses: [String]) -> [String] {
         var values = ["localhost", "127.0.0.1"]
-        let normalized = addresses
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { isValidIPv4($0) }
-            .sorted()
-        for address in normalized where !values.contains(address) {
-            values.append(address)
+        var extras = addresses
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { isValidIPv4($0) || isValidDNSName($0) }
+        if let mdns = mdnsHostname() {
+            extras.append(mdns)
+        }
+        for value in extras.sorted() where !values.contains(value) {
+            values.append(value)
         }
         return values
     }
@@ -302,6 +323,45 @@ public final class TLSIdentityManager: @unchecked Sendable {
         }
     }
 
+    private static func isValidDNSName(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 253 else { return false }
+        let labels = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        guard let tld = labels.last, tld.contains(where: { $0.isLetter }) else { return false }
+        return labels.allSatisfy { label in
+            guard !label.isEmpty, label.count <= 63 else { return false }
+            guard label.first != "-", label.last != "-" else { return false }
+            return label.allSatisfy { character in
+                character.isASCII && (character.isLetter || character.isNumber || character == "-")
+            }
+        }
+    }
+
+    private static func mdnsHostname() -> String? {
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard gethostname(&buffer, buffer.count) == 0 else { return nil }
+        var host = String(cString: buffer).lowercased()
+        while host.hasSuffix(".") { host.removeLast() }
+        if host.hasSuffix(".local") {
+            host = String(host.dropLast(6))
+        }
+        host = String(host.map { character in
+            if character.isASCII && (character.isLetter || character.isNumber || character == "-") {
+                return character
+            }
+            return "-"
+        })
+        while host.hasPrefix("-") { host.removeFirst() }
+        while host.hasSuffix("-") { host.removeLast() }
+        guard host.count >= 2 else { return nil }
+        if host.count > 63 {
+            host = String(host.prefix(63))
+            while host.hasSuffix("-") { host.removeLast() }
+        }
+        guard host.count >= 2 else { return nil }
+        return host + ".local"
+    }
+
     private static func certificateNeedsRenewal(_ url: URL) -> Bool {
         guard let certificate = try? NIOSSLCertificate.fromPEMFile(url.path).first else {
             return true
@@ -310,28 +370,45 @@ public final class TLSIdentityManager: @unchecked Sendable {
     }
 
     private static func fingerprint(certificateURL: URL) throws -> String {
-        let pem = try String(contentsOf: certificateURL, encoding: .utf8)
-        let base64 = pem
-            .components(separatedBy: "-----BEGIN CERTIFICATE-----")
-            .dropFirst()
-            .compactMap { $0.components(separatedBy: "-----END CERTIFICATE-----").first }
-            .joined()
-            .components(separatedBy: .whitespacesAndNewlines)
-            .joined()
-        guard let der = Data(base64Encoded: base64) else {
-            throw TLSIdentityError.invalidIdentity
-        }
-        return SHA256.hash(data: der)
+        fingerprint(der: try certificateDER(fromPEM: certificateURL))
+    }
+
+    public static func fingerprint(der: Data) -> String {
+        SHA256.hash(data: der)
             .map { String(format: "%02X", $0) }
             .joined(separator: ":")
     }
 
-    public static func mobileConfiguration(caCertificateURL: URL, fingerprint: String) -> Data {
-        let certificateData = (try? NIOSSLCertificate.fromPEMFile(caCertificateURL.path).first)
-            .flatMap { try? $0.toDERBytes() }
-            .map(Data.init)
-            ?? Data()
-        let identifier = "local.macdro.root.\(fingerprint.replacingOccurrences(of: ":", with: "").prefix(16))"
+    public static func certificateDER(fromPEM url: URL) throws -> Data {
+        let certificates: [NIOSSLCertificate]
+        do {
+            certificates = try NIOSSLCertificate.fromPEMFile(url.path)
+        } catch {
+            throw TLSIdentityError.missingCertificate
+        }
+        guard let certificate = certificates.first else {
+            throw TLSIdentityError.missingCertificate
+        }
+        return Data(try certificate.toDERBytes())
+    }
+
+    public static func mobileConfiguration(caCertificateURL: URL, fingerprint: String) throws -> Data {
+        let certificateData = try certificateDER(fromPEM: caCertificateURL)
+        guard !certificateData.isEmpty else {
+            throw TLSIdentityError.missingCertificate
+        }
+        let hex = fingerprint.replacingOccurrences(of: ":", with: "").lowercased()
+        guard hex.count >= 32 else {
+            throw TLSIdentityError.invalidIdentity
+        }
+        let identifier = "local.macdro.root.\(hex.prefix(16))"
+        let payloadUUID = [
+            String(hex.prefix(8)),
+            String(hex.dropFirst(8).prefix(4)),
+            String(hex.dropFirst(12).prefix(4)),
+            String(hex.dropFirst(16).prefix(4)),
+            String(hex.dropFirst(20).prefix(12))
+        ].joined(separator: "-").uppercased()
         let certificatePayload: [String: Any] = [
             "PayloadCertificateFileName": "Macdro Local CA.crt",
             "PayloadContent": certificateData,
@@ -339,7 +416,7 @@ public final class TLSIdentityManager: @unchecked Sendable {
             "PayloadDisplayName": "Macdro Local CA",
             "PayloadIdentifier": identifier + ".certificate",
             "PayloadType": "com.apple.security.root",
-            "PayloadUUID": UUID().uuidString,
+            "PayloadUUID": payloadUUID,
             "PayloadVersion": 1
         ]
         let profile: [String: Any] = [
@@ -350,13 +427,16 @@ public final class TLSIdentityManager: @unchecked Sendable {
             "PayloadOrganization": "Macdro",
             "PayloadRemovalDisallowed": false,
             "PayloadType": "Configuration",
-            "PayloadUUID": UUID().uuidString,
+            "PayloadUUID": payloadUUID,
             "PayloadVersion": 1
         ]
-        return (try? PropertyListSerialization.data(
+        guard let data = try? PropertyListSerialization.data(
             fromPropertyList: profile,
             format: .xml,
             options: 0
-        )) ?? Data()
+        ), !data.isEmpty else {
+            throw TLSIdentityError.invalidIdentity
+        }
+        return data
     }
 }
