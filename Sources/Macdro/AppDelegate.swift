@@ -15,8 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var cancellables: Set<AnyCancellable> = []
     private var eventMonitor: Any?
     private var welcomeWindowController: WelcomeWindowController?
-    private var toastController: StatusToastController?
-    private var toastEligible = false
+    private var mainWindowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -34,7 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .applicationDefined
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: ContentView(model: model))
+        popover.contentViewController = NSHostingController(
+            rootView: ContentView(model: model, onShowMainWindow: { [weak self] in
+                self?.showMainWindowFromPopover()
+            })
+        )
         popover.contentSize = NSSize(width: 380, height: 620)
 
         updateStatusItem()
@@ -46,13 +49,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.updateStatusItem()
             }
             .store(in: &cancellables)
-
-        model.$status
-            .receive(on: RunLoop.main)
-            .sink { [weak self] status in
-                self?.serverDidBecomeReady(status)
-            }
-            .store(in: &cancellables)
     }
 
     private func announceLaunch() {
@@ -62,10 +58,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSLog("Macdro launch count=%d welcomeSeen=%d", launchCount, defaults.bool(forKey: LaunchKeys.hasCompletedWelcome) ? 1 : 0)
 
         if defaults.bool(forKey: LaunchKeys.hasCompletedWelcome) {
-            toastEligible = launchCount <= 3
+            showMainWindow()
         } else {
             showWelcomeWindow()
         }
+    }
+
+    private func showMainWindow() {
+        let controller: MainWindowController
+        if let existing = mainWindowController {
+            controller = existing
+        } else {
+            controller = MainWindowController(model: model, onShowMainWindow: nil)
+            mainWindowController = controller
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSLog(
+            "Macdro main window shown visibleWindows=%@",
+            NSApp.windows.filter(\.isVisible).map(\.title).joined(separator: ",") as NSString
+        )
+    }
+
+    private func showMainWindowFromPopover() {
+        closePopover()
+        showMainWindow()
     }
 
     private func showWelcomeWindow() {
@@ -74,13 +92,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model: model,
             onOpen: { [weak self] in
                 self?.dismissWelcomeWindow()
-                self?.showPopover()
+                self?.showMainWindow()
             },
             onQuit: {
                 NSApplication.shared.terminate(nil)
             },
             onClose: { [weak self] in
                 self?.dismissWelcomeWindow()
+                self?.showMainWindow()
             }
         )
         welcomeWindowController = controller
@@ -100,31 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if controller.window?.isVisible == true {
             controller.close()
         }
-    }
-
-    private func serverDidBecomeReady(_ status: AppModel.Status) {
-        guard status == .ready, toastEligible else { return }
-        toastEligible = false
-        showToast()
-    }
-
-    private func showToast() {
-        guard toastController == nil, !popover.isShown else { return }
-        guard let button = statusItem?.button else { return }
-        let controller = StatusToastController()
-        controller.show(below: button)
-        toastController = controller
-        NSLog("Macdro menu-bar toast shown")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.closeToast()
-        }
-    }
-
-    private func closeToast() {
-        guard toastController != nil else { return }
-        NSLog("Macdro menu-bar toast closed")
-        toastController?.close()
-        toastController = nil
     }
 
     private func updateStatusItem() {
@@ -149,7 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func showPopover() {
         guard let button = statusItem?.button else { return }
-        closeToast()
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()

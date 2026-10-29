@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    var onShowMainWindow: (() -> Void)? = nil
     @State private var isDropTargeted = false
     @State private var showingTrustSetup = false
     @State private var settingsController: SettingsWindowController?
@@ -97,6 +98,9 @@ struct ContentView: View {
                 Divider()
                 Toggle("Easy Mode", isOn: easyModeBinding)
                 Button("Settings…", action: openSettings)
+                if let onShowMainWindow {
+                    Button("Show Window", action: onShowMainWindow)
+                }
                 Divider()
                 Button("Quit Macdro") {
                     NSApplication.shared.terminate(nil)
