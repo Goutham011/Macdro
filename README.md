@@ -9,7 +9,7 @@
 [![Version 0.1.1](https://img.shields.io/badge/version-0.1.1-7C3AED?style=flat-square)](https://github.com/Goutham011/Macdro/releases/tag/v0.1.1)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white)
 ![Swift 5.10](https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white)
-[![88 tests](https://img.shields.io/badge/tests-88%20passing-16A34A?style=flat-square)](#testing)
+[![89 tests](https://img.shields.io/badge/tests-89%20passing-16A34A?style=flat-square)](#testing)
 ![No cloud](https://img.shields.io/badge/cloud-none-22C55E?style=flat-square)
 
 [Why Macdro](#why-macdro) · [Architecture](#architecture) · [Engineering](#engineering-highlights) · [Quick start](#quick-start) · [Testing](#testing) · [Roadmap](#status-and-roadmap)
@@ -167,7 +167,7 @@ No third-party frontend framework. No server-side database. No telemetry. No clo
 ## Testing
 
 ```bash
-swift test                    # 88 XCTest cases
+swift test                    # 89 XCTest cases
 swift run MacdroSelfTest      # 71 end-to-end assertions
 swift run MacdroAudit test    # raw HTTP / TLS / range / upload audit
 ./scripts/verify.sh           # clean build + all checks + Xcode build
@@ -201,7 +201,7 @@ For the deeper design decisions, constraints, and build map, read [`PROJECT_CONT
 - [x] Zero-install browser client with live updates
 - [x] Resumable, parallel uploads and ZIP64 transfers
 - [x] Local CA trust flow for iPhone/iPad and Android
-- [x] 88 tests, self-test, audit, zero-warning CI
+- [x] 89 tests, self-test, audit, zero-warning CI
 - [x] Universal DMG release pipeline
 - [ ] Physical iPhone hotspot and Android NCM validation
 - [ ] Developer ID signing and notarization
