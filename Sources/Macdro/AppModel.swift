@@ -20,8 +20,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var tlsFingerprint: String?
     @Published private(set) var caFingerprint: String?
     @Published private(set) var tlsError: String?
+    @Published private(set) var easyMode: Bool = UserDefaults.standard.bool(forKey: AppModel.easyModeKey)
     @Published private(set) var connectionOptions: [NetworkInterfaces.ConnectionOption] = []
     @Published var selectedURL: URL?
+
+    static let easyModeKey = "easyLANMode"
 
     let store = SessionStore()
 
@@ -130,6 +133,7 @@ final class AppModel: ObservableObject {
     }
 
     func startCertificateSetup() {
+        guard !easyMode else { return }
         guard let connection = selectedConnection else {
             errorMessage = "Connect this Mac to Wi-Fi, Ethernet, or USB tethering before setting up phone trust."
             return
@@ -164,6 +168,20 @@ final class AppModel: ObservableObject {
         setupURL = nil
     }
 
+    func setEasyMode(_ enabled: Bool) {
+        guard enabled != easyMode else { return }
+        easyMode = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.easyModeKey)
+        NSLog("Macdro easy mode %d", enabled ? 1 : 0)
+        guard let server else { return }
+        stopCertificateSetup()
+        server.setLANTransport(useTLS: !enabled)
+        lanPort = server.lanPort
+        tlsFingerprint = server.tlsFingerprint
+        caFingerprint = server.caFingerprint
+        refreshNetworkURLs()
+    }
+
     func selectConnection(_ connection: NetworkInterfaces.ConnectionOption) {
         guard let url = urls.first(where: { $0.host == connection.address.ipAddress }) else {
             return
@@ -194,7 +212,8 @@ final class AppModel: ObservableObject {
 
     private func startServer() {
         do {
-            let server = MacdroServer(store: store)
+            let configuration = MacdroServerConfiguration(lanUsesTLS: !easyMode)
+            let server = MacdroServer(store: store, configuration: configuration)
             port = try server.start()
             lanPort = server.lanPort
             tlsFingerprint = server.tlsFingerprint
@@ -255,8 +274,9 @@ final class AppModel: ObservableObject {
         connectionOptions = options
         var newURLs: [URL] = []
         if lanPort > 0 {
+            let scheme = server.lanIsSecure ? "https" : "http"
             newURLs = options.compactMap { option in
-                URL(string: "https://\(option.address.ipAddress):\(lanPort)/s/\(token)/")
+                URL(string: "\(scheme)://\(option.address.ipAddress):\(lanPort)/s/\(token)/")
             }
         }
         if newURLs.isEmpty, let local = server.localURLBase {

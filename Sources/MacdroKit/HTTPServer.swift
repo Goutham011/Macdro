@@ -26,6 +26,7 @@ public struct MacdroServerConfiguration: Sendable {
     public var maxConnectionsPerIP: Int
     public var upload: UploadStore.Configuration
     public var identityDirectory: URL?
+    public var lanUsesTLS: Bool
 
     public init(
         maxBufferedBodyBytes: Int = MacdroLimits.maxBufferedBodyBytes,
@@ -33,7 +34,8 @@ public struct MacdroServerConfiguration: Sendable {
         maxConnections: Int = MacdroLimits.maxConnections,
         maxConnectionsPerIP: Int = MacdroLimits.maxConnectionsPerIP,
         upload: UploadStore.Configuration = UploadStore.Configuration(),
-        identityDirectory: URL? = nil
+        identityDirectory: URL? = nil,
+        lanUsesTLS: Bool = true
     ) {
         self.maxBufferedBodyBytes = maxBufferedBodyBytes
         self.readTimeoutSeconds = readTimeoutSeconds
@@ -41,6 +43,7 @@ public struct MacdroServerConfiguration: Sendable {
         self.maxConnectionsPerIP = maxConnectionsPerIP
         self.upload = upload
         self.identityDirectory = identityDirectory
+        self.lanUsesTLS = lanUsesTLS
     }
 }
 
@@ -52,7 +55,7 @@ public final class MacdroServer {
     private let preferredPort: Int
     private let webRoot: URL
     private let logger: Logger
-    private let configuration: MacdroServerConfiguration
+    private var configuration: MacdroServerConfiguration
     private let connectionGate: ConnectionGate
     private let rateLimiter = RequestRateLimiter()
     private let manifestService = ManifestService()
@@ -68,6 +71,7 @@ public final class MacdroServer {
     public private(set) var lanPort: Int = 0
     public private(set) var tlsIdentity: TLSIdentity?
     public private(set) var lanError: Error?
+    public private(set) var lanIsSecure: Bool = false
 
     public var isRunning: Bool {
         loopbackChannel?.isActive == true
@@ -84,7 +88,8 @@ public final class MacdroServer {
 
     public var lanURLBase: URL? {
         guard lanPort > 0 else { return nil }
-        return URL(string: "https://\(NetworkInterfaces.primaryIPv4()?.ipAddress ?? lanHost):\(lanPort)/s/\(store.token)/")
+        let scheme = lanIsSecure ? "https" : "http"
+        return URL(string: "\(scheme)://\(NetworkInterfaces.primaryIPv4()?.ipAddress ?? lanHost):\(lanPort)/s/\(store.token)/")
     }
 
     public var tlsFingerprint: String? {
@@ -150,7 +155,7 @@ public final class MacdroServer {
         var lastError: Error?
         for candidate in candidates {
             do {
-                let channel = try makeBootstrap(secure: false, sslContext: nil)
+                let channel = try makeBootstrap(secure: false, sslContext: nil, isLAN: false)
                     .bind(host: loopbackHost, port: candidate)
                     .wait()
                 loopbackChannel = channel
@@ -179,7 +184,7 @@ public final class MacdroServer {
     }
 
     public func refreshTLSIdentity() throws {
-        guard !Self.isLoopback(lanHost) else { return }
+        guard !Self.isLoopback(lanHost), configuration.lanUsesTLS else { return }
         let identity = try tlsIdentityManager.identity(
             for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress)
         )
@@ -196,7 +201,24 @@ public final class MacdroServer {
         startLANListener(candidates: candidates)
     }
 
+    public func setLANTransport(useTLS: Bool) {
+        guard !Self.isLoopback(lanHost), useTLS != configuration.lanUsesTLS else { return }
+        configuration.lanUsesTLS = useTLS
+        if let lanChannel {
+            try? lanChannel.close().wait()
+            self.lanChannel = nil
+            lanPort = 0
+        }
+        let candidates = preferredPort == 0 ? [0] : Array(preferredPort...(preferredPort + 20))
+        startLANListener(candidates: candidates)
+    }
+
     private func startLANListener(candidates: [Int]) {
+        lanIsSecure = false
+        if !configuration.lanUsesTLS {
+            startPlainLANListener(candidates: candidates)
+            return
+        }
         do {
             let identity = try tlsIdentityManager.identity(
                 for: NetworkInterfaces.ipv4Addresses().map(\.ipAddress)
@@ -206,12 +228,13 @@ public final class MacdroServer {
             var tlsError: Error?
             for candidate in candidates where candidate != port {
                 do {
-                    let channel = try makeBootstrap(secure: true, sslContext: sslContext)
+                    let channel = try makeBootstrap(secure: true, sslContext: sslContext, isLAN: true)
                         .bind(host: lanHost, port: candidate)
                         .wait()
                     lanChannel = channel
                     lanPort = channel.localAddress?.port ?? candidate
                     lanError = nil
+                    lanIsSecure = true
                     logger.info("Macdro receiver listening on https://\(lanHost):\(lanPort)")
                     return
                 } catch {
@@ -224,6 +247,28 @@ public final class MacdroServer {
             lanError = error
             logger.error("LAN TLS identity unavailable: \(error)")
         }
+    }
+
+    private func startPlainLANListener(candidates: [Int]) {
+        tlsIdentity = nil
+        lanIsSecure = false
+        var bindError: Error?
+        for candidate in candidates where candidate != port {
+            do {
+                let channel = try makeBootstrap(secure: false, sslContext: nil, isLAN: true)
+                    .bind(host: lanHost, port: candidate)
+                    .wait()
+                lanChannel = channel
+                lanPort = channel.localAddress?.port ?? candidate
+                lanError = nil
+                logger.info("Macdro receiver listening on http://\(lanHost):\(lanPort) (easy mode)")
+                return
+            } catch {
+                bindError = error
+            }
+        }
+        lanError = bindError
+        logger.error("LAN HTTP listener unavailable: \(String(describing: bindError))")
     }
 
     public func stop() {
@@ -242,7 +287,7 @@ public final class MacdroServer {
         try? group.syncShutdownGracefully()
     }
 
-    private func makeBootstrap(secure: Bool, sslContext: NIOSSLContext?) -> ServerBootstrap {
+    private func makeBootstrap(secure: Bool, sslContext: NIOSSLContext?, isLAN: Bool) -> ServerBootstrap {
         let store = self.store
         let uploadStore = self.uploadStore
         let webRoot = self.webRoot
@@ -306,7 +351,8 @@ public final class MacdroServer {
                             archiveService: archiveService,
                             maxBufferedBodyBytes: configuration.maxBufferedBodyBytes,
                             headerTimeoutSeconds: configuration.readTimeoutSeconds,
-                            isSecure: secure
+                            isSecure: secure,
+                            isLAN: isLAN
                         )
                     )
                     return channel.eventLoop.makeSucceededVoidFuture()

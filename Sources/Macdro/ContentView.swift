@@ -7,6 +7,14 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
     @State private var isDropTargeted = false
     @State private var showingTrustSetup = false
+    @State private var settingsController: SettingsWindowController?
+
+    private var easyModeBinding: Binding<Bool> {
+        Binding(
+            get: { model.easyMode },
+            set: { model.setEasyMode($0) }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,6 +95,9 @@ struct ContentView: View {
                 Divider()
                 Button("New Session", action: model.startNewSession)
                 Divider()
+                Toggle("Easy Mode", isOn: easyModeBinding)
+                Button("Settings…", action: openSettings)
+                Divider()
                 Button("Quit Macdro") {
                     NSApplication.shared.terminate(nil)
                 }
@@ -149,11 +160,11 @@ struct ContentView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     if model.isLANAvailable {
-                        Text(model.tlsFingerprint == nil ? "Preparing certificate…" : "Install Macdro trust first if prompted")
+                        Text(trustHint)
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                     } else {
-                        Text("LAN HTTPS unavailable · local browser only")
+                        Text(model.easyMode ? "LAN unavailable · local browser only" : "LAN HTTPS unavailable · local browser only")
                             .font(.system(size: 10))
                             .foregroundStyle(.orange)
                     }
@@ -197,16 +208,18 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
 
-                    Button {
-                        model.startCertificateSetup()
-                        showingTrustSetup = true
-                    } label: {
-                        Label("Trust", systemImage: "checkmark.shield")
-                            .font(.system(size: 10.5, weight: .medium))
+                    if !model.easyMode {
+                        Button {
+                            model.startCertificateSetup()
+                            showingTrustSetup = true
+                        } label: {
+                            Label("Trust", systemImage: "checkmark.shield")
+                                .font(.system(size: 10.5, weight: .medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .disabled(!model.isLANAvailable)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(!model.isLANAvailable)
                 }
                 .padding(.horizontal, 4)
             } else {
@@ -320,7 +333,7 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack {
-            Text("Local · HTTPS · resumable")
+            Text(model.easyMode ? "Local · HTTP (easy mode) · resumable" : "Local · HTTPS · resumable")
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -355,18 +368,40 @@ struct ContentView: View {
 
     private var connectionHint: String {
         guard let transport = model.selectedConnection?.transport else {
-            return "Encrypted HTTPS · no app required"
+            return model.easyMode ? "Plain HTTP · no certificate needed" : "Encrypted HTTPS · no app required"
         }
         switch transport {
         case .usbTethering:
-            return "USB tethering · no Wi-Fi needed"
+            return model.easyMode ? "USB tethering · no certificate needed" : "USB tethering · no Wi-Fi needed"
         case .wifi:
-            return "Wi-Fi · same network"
+            return model.easyMode ? "Wi-Fi · no certificate needed" : "Wi-Fi · same network"
         case .ethernet:
-            return "Ethernet · same network"
+            return model.easyMode ? "Ethernet · no certificate needed" : "Ethernet · same network"
         case .unknown:
-            return "LAN · encrypted HTTPS · no app required"
+            return model.easyMode ? "LAN · no certificate needed · no app required" : "LAN · encrypted HTTPS · no app required"
         }
+    }
+
+    private var trustHint: String {
+        if model.easyMode {
+            return "No certificate needed · just open the link"
+        }
+        return model.tlsFingerprint == nil ? "Preparing certificate…" : "Install Macdro trust first if prompted"
+    }
+
+    private func openSettings() {
+        if let settingsController {
+            NSApp.activate(ignoringOtherApps: true)
+            settingsController.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        let controller = SettingsWindowController(model: model) {
+            settingsController = nil
+        }
+        settingsController = controller
+        NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
     }
 
     private var selectedTransportIcon: String {

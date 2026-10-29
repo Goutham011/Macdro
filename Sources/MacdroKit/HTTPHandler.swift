@@ -17,6 +17,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
     private let ioPool: NIOThreadPool
     private let maxBufferedBodyBytes: Int
     private let isSecure: Bool
+    private let isLAN: Bool
     private var clientID = "unknown"
     private let rateLimiter: RequestRateLimiter
     private let manifestService: ManifestService
@@ -68,7 +69,8 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         archiveService: ArchiveService,
         maxBufferedBodyBytes: Int = MacdroLimits.maxBufferedBodyBytes,
         headerTimeoutSeconds: Int = MacdroLimits.readTimeoutSeconds,
-        isSecure: Bool = false
+        isSecure: Bool = false,
+        isLAN: Bool = false
     ) {
         self.store = store
         self.uploadStore = uploadStore
@@ -81,6 +83,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         self.maxBufferedBodyBytes = max(0, maxBufferedBodyBytes)
         self.headerTimeoutSeconds = max(1, headerTimeoutSeconds)
         self.isSecure = isSecure
+        self.isLAN = isLAN
         self.requestBody = ByteBufferAllocator().buffer(capacity: 0)
     }
 
@@ -1501,10 +1504,21 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
             request: request,
             status: .ok,
             contentType: contentType,
-            body: data,
+            body: honestBody(for: name, data: data),
             cacheControl: "no-store",
             extraHeaders: extraHeaders
         )
+    }
+
+    private func honestBody(for name: String, data: Data) -> Data {
+        guard name == "index.html", isLAN, !isSecure else { return data }
+        guard let html = String(data: data, encoding: .utf8) else { return data }
+        let updated = html.replacingOccurrences(
+            of: "Encrypted transfer on your local network. Nothing is uploaded to the cloud.",
+            with: "Transfers stay on your local network. Nothing is uploaded to the cloud. Easy mode: connections are not encrypted in transit."
+        )
+        guard updated != html else { return data }
+        return Data(updated.utf8)
     }
 
     private func serveFile(

@@ -9,7 +9,7 @@
 [![Version 0.1.1](https://img.shields.io/badge/version-0.1.1-7C3AED?style=flat-square)](https://github.com/Goutham011/Macdro/releases/tag/v0.1.1)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white)
 ![Swift 5.10](https://img.shields.io/badge/Swift-5.10-F05138?style=flat-square&logo=swift&logoColor=white)
-[![84 tests](https://img.shields.io/badge/tests-84%20passing-16A34A?style=flat-square)](#testing)
+[![88 tests](https://img.shields.io/badge/tests-88%20passing-16A34A?style=flat-square)](#testing)
 ![No cloud](https://img.shields.io/badge/cloud-none-22C55E?style=flat-square)
 
 [Why Macdro](#why-macdro) · [Architecture](#architecture) · [Engineering](#engineering-highlights) · [Quick start](#quick-start) · [Testing](#testing) · [Roadmap](#status-and-roadmap)
@@ -37,6 +37,7 @@
 - **Folders, not just files.** Relative paths are preserved in both directions; “Download all” produces a streaming ZIP64 archive.
 - **Connection-aware.** Detects Wi-Fi, Ethernet, iPhone USB tethering, and Android NCM tethering, then lets you choose the transport to share.
 - **Trust that is visible.** A five-minute setup server serves an iPhone/iPad `.mobileconfig` (DER root profile) or a DER/PEM CA certificate for Android/desktop, alongside the CA SHA-256 fingerprint your phone displays after installing.
+- **Easy mode.** Flip one switch in Settings (or the menu) to serve the phone over plain HTTP instead: no certificate to install and no browser warnings — for when zero friction matters more than in-transit encryption on your own Wi-Fi.
 - **More than files.** Move plain text through the Mac clipboard from the browser.
 - **Recovery states that make sense.** Session ended, connection lost, insufficient storage, rate limited, cancelled, and retryable failures all have explicit UI.
 
@@ -64,7 +65,7 @@ flowchart LR
 ```
 
 - **Loopback HTTP** serves the Mac-local receiver.
-- **LAN HTTPS** serves phones and other computers through a locally trusted CA.
+- **LAN HTTPS** serves phones and other computers through a locally trusted CA — or plain HTTP when Easy mode is explicitly enabled.
 - **The setup server** is temporary, serves only trust material, and stops after five minutes.
 - **One SwiftNIO handler** covers static assets, session JSON, SSE, ranges, ZIPs, clipboard, and uploads, with bounded buffers and backpressure.
 
@@ -121,7 +122,7 @@ Benchmarks were measured locally on the development Mac; they are illustrative, 
 2. Open the DMG and drag **Macdro** into **Applications**.
 3. Launch Macdro. It appears in the menu bar — there is no Dock icon.
 4. Put the Mac and phone on the same Wi-Fi, plug in Ethernet, or enable USB tethering.
-5. Scan the QR code from the menu bar. If prompted, install the Macdro local CA and enable full trust on iOS.
+5. Scan the QR code from the menu bar. If prompted, install the Macdro local CA and enable full trust on iOS. Prefer zero setup? Turn on **Easy mode** in the Macdro menu (⋯ → Easy Mode) first — the phone connects over plain HTTP with no certificate and no warnings.
 
 > **First launch:** the current DMG is ad-hoc signed, so macOS may require **Control-click → Open** until Developer ID signing and notarization are added.
 
@@ -166,13 +167,13 @@ No third-party frontend framework. No server-side database. No telemetry. No clo
 ## Testing
 
 ```bash
-swift test                    # 84 XCTest cases
+swift test                    # 88 XCTest cases
 swift run MacdroSelfTest      # 71 end-to-end assertions
 swift run MacdroAudit test    # raw HTTP / TLS / range / upload audit
 ./scripts/verify.sh           # clean build + all checks + Xcode build
 ```
 
-Coverage includes TLS/listener separation, token and cookie behavior, resumable uploads, quotas, symlink and traversal defenses, slowloris bounds, range fuzz cases, SHA-256 manifests, TLS full/range/ZIP downloads, SecTrust chain/hostname validation of the served certificate, SAN encoding, SSE heartbeats, and transport classification.
+Coverage includes TLS/listener separation (including the Easy-mode plain-HTTP LAN listener and mode switching), token and cookie behavior, resumable uploads, quotas, symlink and traversal defenses, slowloris bounds, range fuzz cases, SHA-256 manifests, TLS full/range/ZIP downloads, SecTrust chain/hostname validation of the served certificate, SAN encoding, SSE heartbeats, and transport classification.
 
 `verify.sh` treats compiler warnings as failures. CI runs the same gate on macOS 15 with Swift 6.1.
 
@@ -196,10 +197,11 @@ For the deeper design decisions, constraints, and build map, read [`PROJECT_CONT
 **Current: v0.1.1 — private beta.** Automated acceptance is green and the universal DMG is published through GitHub Releases. v0.1.1 fixes the DER trust profile and certificate fingerprint display, and makes phone downloads work on Android through an in-page save path.
 
 - [x] Dual loopback HTTP / LAN HTTPS receiver
+- [x] Easy mode: opt-in plain-HTTP LAN receiver (Settings toggle)
 - [x] Zero-install browser client with live updates
 - [x] Resumable, parallel uploads and ZIP64 transfers
 - [x] Local CA trust flow for iPhone/iPad and Android
-- [x] 84 tests, self-test, audit, zero-warning CI
+- [x] 88 tests, self-test, audit, zero-warning CI
 - [x] Universal DMG release pipeline
 - [ ] Physical iPhone hotspot and Android NCM validation
 - [ ] Developer ID signing and notarization
