@@ -72,13 +72,15 @@ public final class MacdroSetupServer {
         }
 
         do {
-            let handler = SetupHTTPHandler(identity: resolved, logger: logger)
+            let identity = resolved
+            let handlerLogger = logger
             let channel = try ServerBootstrap(group: group)
                 .serverChannelOption(ChannelOptions.backlog, value: 64)
                 .serverChannelOption(ChannelOptions.socket(SOL_SOCKET, SO_REUSEADDR), value: 1)
                 .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: 1)
                 .childChannelInitializer { channel in
-                    channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true).flatMap {
+                    let handler = SetupHTTPHandler(identity: identity, logger: handlerLogger)
+                    return channel.pipeline.configureHTTPServerPipeline(withErrorHandling: true).flatMap {
                         channel.pipeline.addHandler(handler)
                     }
                 }

@@ -27,8 +27,10 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
     private let uploadCoalesceBytes = MacdroLimits.uploadCoalesceBytes
     private let maxRejectedBodyDrainBytes = MacdroLimits.maxRejectedBodyDrainBytes
     private let headerTimeoutSeconds: Int
+    private let bodyTimeoutPolicy: BodyTimeoutPolicy
 
     private var headerTimeoutTask: Scheduled<Void>?
+    private var bodyTimeoutTask: Scheduled<Void>?
     private var isStreamingResponse = false
     private var requestHead: HTTPRequestHead?
     private var requestBody: ByteBuffer
@@ -69,6 +71,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         archiveService: ArchiveService,
         maxBufferedBodyBytes: Int = MacdroLimits.maxBufferedBodyBytes,
         headerTimeoutSeconds: Int = MacdroLimits.readTimeoutSeconds,
+        bodyTimeoutPolicy: BodyTimeoutPolicy = BodyTimeoutPolicy(),
         isSecure: Bool = false,
         isLAN: Bool = false
     ) {
@@ -82,6 +85,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
         self.archiveService = archiveService
         self.maxBufferedBodyBytes = max(0, maxBufferedBodyBytes)
         self.headerTimeoutSeconds = max(1, headerTimeoutSeconds)
+        self.bodyTimeoutPolicy = bodyTimeoutPolicy
         self.isSecure = isSecure
         self.isLAN = isLAN
         self.requestBody = ByteBufferAllocator().buffer(capacity: 0)
@@ -114,6 +118,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
             pendingUploadBytes = 0
             readsPaused = false
             isFinalizingUpload = false
+            armBodyTimeout(head, context: context)
             prepareUpload(head: head, context: context)
 
             if upload == nil,
@@ -145,6 +150,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
                 requestBody.writeBuffer(&body)
             }
         case .end:
+            cancelBodyTimeout()
             defer { armHeaderTimeout(context) }
             if isRejectingRequest {
                 isRejectingRequest = false
@@ -206,6 +212,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
 
     func channelInactive(context: ChannelHandlerContext) {
         cancelHeaderTimeout()
+        cancelBodyTimeout()
         sseTask?.cancel()
         sseTask = nil
         cancelUploadIfNeeded(context: context)
@@ -214,6 +221,7 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         cancelHeaderTimeout()
+        cancelBodyTimeout()
         cancelUploadIfNeeded(context: context)
         resetTransferState()
         logger.error("HTTP connection error ip=\(clientID): \(error)")
@@ -232,6 +240,25 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
     private func cancelHeaderTimeout() {
         headerTimeoutTask?.cancel()
         headerTimeoutTask = nil
+    }
+
+    private func armBodyTimeout(_ head: HTTPRequestHead, context: ChannelHandlerContext) {
+        cancelBodyTimeout()
+        let declaredLength = head.headers.first(name: "Content-Length").flatMap(UInt64.init)
+        let seconds = bodyTimeoutPolicy.deadlineSeconds(contentLength: declaredLength)
+        bodyTimeoutTask = context.eventLoop.scheduleTask(in: .seconds(Int64(seconds))) { [weak self, context] in
+            guard let self, context.channel.isActive else { return }
+            if self.isRejectingRequest {
+                context.close(promise: nil)
+                return
+            }
+            self.sendRequestTimeout(context: context)
+        }
+    }
+
+    private func cancelBodyTimeout() {
+        bodyTimeoutTask?.cancel()
+        bodyTimeoutTask = nil
     }
 
     private func sendRequestTimeout(context: ChannelHandlerContext) {
@@ -566,17 +593,15 @@ final class MacdroHTTPHandler: ChannelInboundHandler {
             return
         }
 
-        if segments.count == 2,
-           segments[0] == "f",
-           let id = UUID(uuidString: segments[1]),
-           let file = store.file(id: id)
-        {
+        if segments.count == 2, segments[0] == "f" {
             guard cookieAuthorized(head) else {
                 unauthorized(context: context, request: head)
                 return
             }
-            serveFile(file, context: context, request: head)
-            return
+            if let id = UUID(uuidString: segments[1]), let file = store.file(id: id) {
+                serveFile(file, context: context, request: head)
+                return
+            }
         }
 
         guard segments.count >= 2,

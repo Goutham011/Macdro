@@ -27,6 +27,7 @@ public struct MacdroServerConfiguration: Sendable {
     public var upload: UploadStore.Configuration
     public var identityDirectory: URL?
     public var lanUsesTLS: Bool
+    public var bodyTimeoutPolicy: BodyTimeoutPolicy
 
     public init(
         maxBufferedBodyBytes: Int = MacdroLimits.maxBufferedBodyBytes,
@@ -35,7 +36,8 @@ public struct MacdroServerConfiguration: Sendable {
         maxConnectionsPerIP: Int = MacdroLimits.maxConnectionsPerIP,
         upload: UploadStore.Configuration = UploadStore.Configuration(),
         identityDirectory: URL? = nil,
-        lanUsesTLS: Bool = true
+        lanUsesTLS: Bool = true,
+        bodyTimeoutPolicy: BodyTimeoutPolicy = BodyTimeoutPolicy()
     ) {
         self.maxBufferedBodyBytes = maxBufferedBodyBytes
         self.readTimeoutSeconds = readTimeoutSeconds
@@ -44,6 +46,7 @@ public struct MacdroServerConfiguration: Sendable {
         self.upload = upload
         self.identityDirectory = identityDirectory
         self.lanUsesTLS = lanUsesTLS
+        self.bodyTimeoutPolicy = bodyTimeoutPolicy
     }
 }
 
@@ -299,6 +302,7 @@ public final class MacdroServer {
         let archiveService = self.archiveService
         let ioPool = self.ioPool
         let readTimeout = TimeAmount.seconds(Int64(max(1, configuration.readTimeoutSeconds)))
+        let bodyTimeoutPolicy = configuration.bodyTimeoutPolicy
 
         var decoderLimits = NIOHTTPDecoderLimitConfiguration()
         decoderLimits.maxHeaderFieldSize = MacdroLimits.maxHeaderFieldSize
@@ -351,6 +355,7 @@ public final class MacdroServer {
                             archiveService: archiveService,
                             maxBufferedBodyBytes: configuration.maxBufferedBodyBytes,
                             headerTimeoutSeconds: configuration.readTimeoutSeconds,
+                            bodyTimeoutPolicy: bodyTimeoutPolicy,
                             isSecure: secure,
                             isLAN: isLAN
                         )

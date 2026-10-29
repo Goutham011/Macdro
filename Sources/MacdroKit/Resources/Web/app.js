@@ -325,15 +325,12 @@
         if (window.crypto && typeof window.crypto.randomUUID === "function") {
             return window.crypto.randomUUID().replace(/-/g, "");
         }
-        const bytes = new Uint8Array(16);
         if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+            const bytes = new Uint8Array(16);
             window.crypto.getRandomValues(bytes);
-        } else {
-            for (let index = 0; index < bytes.length; index += 1) {
-                bytes[index] = Math.floor(Math.random() * 256);
-            }
+            return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
         }
-        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+        return null;
     };
 
     const openUploadDatabase = () => new Promise((resolve) => {
@@ -472,6 +469,11 @@
             if (status === 401 || status === 404) return "Session ended — rescan the QR code";
             return `Upload failed (HTTP ${status})`;
         };
+
+        if (!uploadId) {
+            fail("Secure random IDs are unavailable in this browser");
+            return;
+        }
 
         const succeed = async (saved) => {
             entry.done = true;

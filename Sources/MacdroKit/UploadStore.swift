@@ -77,6 +77,7 @@ public final class UploadStore: @unchecked Sendable {
         public var quotaBytes: UInt64?
         public var reservedDiskBytes: UInt64
         public var maxUploadBytes: UInt64
+        public var leaseHardTimeout: TimeInterval
 
         public init(
             idleTimeout: TimeInterval = MacdroLimits.resumableTTLSeconds,
@@ -87,7 +88,8 @@ public final class UploadStore: @unchecked Sendable {
             maxConcurrentPerClient: Int = MacdroLimits.maxConcurrentUploadsPerClient,
             quotaBytes: UInt64? = MacdroLimits.maxTotalUploadBytes,
             reservedDiskBytes: UInt64 = MacdroLimits.reservedDiskBytes,
-            maxUploadBytes: UInt64 = MacdroLimits.maxUploadBytes
+            maxUploadBytes: UInt64 = MacdroLimits.maxUploadBytes,
+            leaseHardTimeout: TimeInterval = MacdroLimits.leaseHardTimeoutSeconds
         ) {
             self.idleTimeout = idleTimeout
             self.cleanupInterval = cleanupInterval
@@ -98,6 +100,7 @@ public final class UploadStore: @unchecked Sendable {
             self.quotaBytes = quotaBytes
             self.reservedDiskBytes = reservedDiskBytes
             self.maxUploadBytes = maxUploadBytes
+            self.leaseHardTimeout = leaseHardTimeout
         }
     }
 
@@ -109,6 +112,7 @@ public final class UploadStore: @unchecked Sendable {
         let client: String
         var lastActivity: Date
         var leaseHeld: Bool
+        var leaseAcquiredAt: Date?
         var offset: UInt64
     }
 
@@ -119,6 +123,8 @@ public final class UploadStore: @unchecked Sendable {
     private var nonResumableByClient: [String: Int] = [:]
     private var reservedRemaining: UInt64 = 0
     private var committedBytes: UInt64 = 0
+    private var commitGeneration: UInt64 = 0
+    private var reconcileScheduled = false
     private var completedUploads: [String: (date: Date, offset: UInt64)] = [:]
     private let cleanupQueue = DispatchQueue(label: "macdro.upload.cleanup", qos: .utility)
     private var cleanupTimer: DispatchSourceTimer?
@@ -213,6 +219,7 @@ public final class UploadStore: @unchecked Sendable {
                 throw UploadError.tooManyUploads
             }
             entry.leaseHeld = true
+            entry.leaseAcquiredAt = now
             entry.lastActivity = now
             resumableUploads[id] = entry
             entry.transaction.claimLease(id: id)
@@ -247,6 +254,7 @@ public final class UploadStore: @unchecked Sendable {
             client: client,
             lastActivity: now,
             leaseHeld: true,
+            leaseAcquiredAt: now,
             offset: 0
         )
         return transaction
@@ -256,6 +264,7 @@ public final class UploadStore: @unchecked Sendable {
         lock.lock()
         if var entry = resumableUploads[id] {
             entry.leaseHeld = false
+            entry.leaseAcquiredAt = nil
             entry.lastActivity = Date()
             resumableUploads[id] = entry
         }
@@ -302,8 +311,14 @@ public final class UploadStore: @unchecked Sendable {
     public func cleanupExpired(now: Date = Date()) {
         var expired: [UploadTransaction] = []
         lock.lock()
-        for (id, entry) in resumableUploads
-        where !entry.leaseHeld && now.timeIntervalSince(entry.lastActivity) >= configuration.idleTimeout {
+        for (id, entry) in resumableUploads {
+            let idleExpired = !entry.leaseHeld
+                && now.timeIntervalSince(entry.lastActivity) >= configuration.idleTimeout
+            let leaseExpired = entry.leaseHeld
+                && entry.leaseAcquiredAt.map({
+                    now.timeIntervalSince($0) >= configuration.leaseHardTimeout
+                }) == true
+            guard idleExpired || leaseExpired else { continue }
             resumableUploads.removeValue(forKey: id)
             expired.append(entry.transaction)
         }
@@ -375,6 +390,7 @@ public final class UploadStore: @unchecked Sendable {
         reservedRemaining = reservedRemaining >= amount ? reservedRemaining - amount : 0
         let (next, overflow) = committedBytes.addingReportingOverflow(additional)
         committedBytes = overflow ? UInt64.max : next
+        commitGeneration &+= 1
         if let leaseID = transaction.leaseUploadID, var entry = resumableUploads[leaseID] {
             entry.offset = entry.offset &+ additional
             resumableUploads[leaseID] = entry
@@ -400,6 +416,7 @@ public final class UploadStore: @unchecked Sendable {
             committedBytes = committedBytes >= transaction.written
                 ? committedBytes - transaction.written
                 : 0
+            commitGeneration &+= 1
         }
         reservedPaths.remove(transaction.relativePath)
         if !resumable {
@@ -534,6 +551,7 @@ public final class UploadStore: @unchecked Sendable {
             let used = committedBytes
             let (committed, overflow) = reservedRemaining.addingReportingOverflow(additional)
             guard !overflow, used <= quota, committed <= quota - used else {
+                scheduleQuotaReconciliationLocked()
                 throw UploadError.insufficientStorage
             }
         }
@@ -566,9 +584,44 @@ public final class UploadStore: @unchecked Sendable {
         )
         timer.setEventHandler { [weak self] in
             self?.cleanupExpired()
+            self?.reconcileQuotaNow()
         }
         timer.resume()
         cleanupTimer = timer
+    }
+
+    /// Rescans the upload directory and refreshes `committedBytes` so external
+    /// deletions (e.g. Finder) are reflected in quota admission. Runs the scan
+    /// off the caller's thread concerns by relying on the caller (timer or
+    /// `cleanupQueue`); the apply step is guarded by `commitGeneration` so an
+    /// in-flight commit cannot be double-counted. Staleness is bounded by the
+    /// cleanup interval (60 s by default) plus one scan duration.
+    public func reconcileQuotaNow() {
+        lock.lock()
+        let generation = commitGeneration
+        lock.unlock()
+
+        let scanned = Self.directoryBytes(at: directory)
+
+        lock.lock()
+        if commitGeneration == generation {
+            committedBytes = scanned
+        }
+        lock.unlock()
+    }
+
+    /// Assumes `lock` is held. Coalesces quota-rejection-triggered rescans so a
+    /// burst of failing uploads schedules at most one scan.
+    private func scheduleQuotaReconciliationLocked() {
+        guard !reconcileScheduled else { return }
+        reconcileScheduled = true
+        cleanupQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.reconcileScheduled = false
+            self.lock.unlock()
+            self.reconcileQuotaNow()
+        }
     }
 
     private static func removeOrphanedTemporaryFiles(in directory: URL) {
@@ -615,11 +668,7 @@ public final class UploadStore: @unchecked Sendable {
 
     private static func sanitizeName(_ raw: String) -> String {
         let sanitized = sanitizeComponent(raw)
-        let name = sanitized.isEmpty ? "Untitled" : sanitized
-        if name.hasPrefix(".macdro-") && name.hasSuffix(".part") {
-            return "_" + name
-        }
-        return name
+        return sanitized.isEmpty ? "Untitled" : sanitized
     }
 
     private static func sanitizeComponent(_ raw: String) -> String {
@@ -645,7 +694,11 @@ public final class UploadStore: @unchecked Sendable {
         if name == "." || name == ".." {
             return "_"
         }
-        return truncateFilename(name)
+        name = truncateFilename(name)
+        if name.hasPrefix(".macdro-") && name.hasSuffix(".part") {
+            return "_" + name
+        }
+        return name
     }
 
     private static func truncateFilename(_ name: String) -> String {
